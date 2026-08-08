@@ -26,6 +26,11 @@ export async function pingDatabase() {
 //   3. Otherwise, create a new ledger with them as its owner.
 export async function ensureLedger(user) {
   const email = user.email;
+  // The ledger's own name and the person's display name to other members
+  // are two different things — a person's full name isn't a good ledger
+  // title, so these are kept separate rather than reusing one value for
+  // both.
+  const personName = user.user_metadata?.full_name || user.user_metadata?.display_name || (email ? email.split("@")[0] : "Someone");
 
   if (email) {
     const { data: invites } = await supabase
@@ -33,12 +38,11 @@ export async function ensureLedger(user) {
       .select("id,ledger_id")
       .ilike("email", email);
     if (invites && invites.length > 0) {
-      const displayName = user.user_metadata?.display_name || email.split("@")[0];
       for (const invite of invites) {
         await supabase.from("ledger_members").insert({
           ledger_id: invite.ledger_id,
           user_id: user.id,
-          display_name: displayName,
+          display_name: personName,
           role: "member",
         }); // ignore errors here (e.g. already a member) — the delete below still cleans up the invite
         await supabase.from("ledger_invites").delete().eq("id", invite.id);
@@ -69,7 +73,7 @@ export async function ensureLedger(user) {
   const { error: memberErr } = await supabase.from("ledger_members").insert({
     ledger_id: created.id,
     user_id: user.id,
-    display_name: name,
+    display_name: personName,
     role: "owner",
   });
   if (memberErr) throw memberErr;
@@ -419,5 +423,22 @@ export async function getReceiptUrl(path) {
 
 export async function deleteReceipt(path) {
   const { error } = await supabase.storage.from("receipts").remove([path]);
+  if (error) throw error;
+}
+
+/* ---------------------------------------------------------------
+   Deleting a ledger (owner only — enforced by RLS, not just this check)
+------------------------------------------------------------------ */
+export async function deleteLedger(ledgerId) {
+  const { error } = await supabase.from("ledgers").delete().eq("id", ledgerId);
+  if (error) throw error;
+}
+
+export async function updateMemberDisplayName(ledgerId, userId, displayName) {
+  const { error } = await supabase
+    .from("ledger_members")
+    .update({ display_name: displayName })
+    .eq("ledger_id", ledgerId)
+    .eq("user_id", userId);
   if (error) throw error;
 }

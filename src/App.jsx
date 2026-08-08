@@ -20,6 +20,7 @@ import {
   fetchIncome, insertIncomeRemote, deleteIncomeRemote,
   fetchRecurringExpenses, createRecurringExpense, deleteRecurringExpense, markRecurringGenerated,
   logActivity, fetchActivityLog, saveCurrencyRemote, uploadReceipt, getReceiptUrl, deleteReceipt,
+  deleteLedger, updateMemberDisplayName,
 } from "./store";
 
 /* ---------------------------------------------------------------
@@ -387,6 +388,10 @@ export default function App() {
 
   const activeProfile = demoProfile || profile;
   const booting = session === undefined || (session && !mfaChecked) || (session && mfaChecked && !mfaPending && !activeProfile && !profileError);
+  // Applies retroactively too — anyone who signed up before this feature
+  // existed gets asked for their name the next time they log in, not just
+  // brand-new sign-ups.
+  const needsProfileCompletion = !demoProfile && !!session && !mfaPending && mfaChecked && !session.user?.user_metadata?.full_name;
 
   const handleLogout = async () => {
     if (demoProfile) {
@@ -405,10 +410,47 @@ export default function App() {
 
   const handleCreateLedger = async (name) => {
     if (!session?.user?.id) return;
-    const created = await createLedger(session.user.id, name, session.user.user_metadata?.display_name || session.user.email?.split("@")[0]);
+    const personName = session.user.user_metadata?.full_name || session.user.user_metadata?.display_name || session.user.email?.split("@")[0];
+    const created = await createLedger(session.user.id, name, personName);
     setLedgerList((prev) => [...prev, created]);
     localStorage.setItem(`trackit-active-ledger-${session.user.id}`, created.id);
     setProfile({ id: created.id, name: created.name });
+  };
+
+  const handleDeleteLedger = async (ledgerId) => {
+    if (!session?.user?.id) return;
+    await deleteLedger(ledgerId);
+    const remaining = ledgerList.filter((l) => l.id !== ledgerId);
+
+    if (remaining.length === 0) {
+      // Never leave the account with zero ledgers — the rest of the app
+      // assumes there's always at least one.
+      const created = await createLedger(session.user.id, "My ledger", session.user.user_metadata?.full_name || session.user.user_metadata?.display_name);
+      setLedgerList([created]);
+      localStorage.setItem(`trackit-active-ledger-${session.user.id}`, created.id);
+      setProfile({ id: created.id, name: created.name });
+      return;
+    }
+
+    setLedgerList(remaining);
+    if (profile?.id === ledgerId) {
+      const next = remaining[0];
+      localStorage.setItem(`trackit-active-ledger-${session.user.id}`, next.id);
+      setProfile({ id: next.id, name: next.name });
+    }
+  };
+
+  const handleProfileSaved = (fullName) => {
+    // Fire-and-forget: Dashboard's own member list will show the updated
+    // name the moment it next loads regardless, this just makes any
+    // ledgers the person already belongs to reflect it immediately too,
+    // rather than showing their old placeholder name until they're edited
+    // again.
+    if (session?.user?.id) {
+      ledgerList.forEach((l) => {
+        updateMemberDisplayName(l.id, session.user.id, fullName).catch(() => {});
+      });
+    }
   };
 
   return (
@@ -440,6 +482,8 @@ export default function App() {
             />
           ) : passwordRecovery ? (
             <ResetPasswordScreen onDone={() => setPasswordRecovery(false)} />
+          ) : needsProfileCompletion ? (
+            <CompleteProfileModal onSaved={handleProfileSaved} />
           ) : activeProfile ? (
             <Dashboard
               profile={activeProfile}
@@ -449,6 +493,7 @@ export default function App() {
               ledgerList={demoProfile ? [] : ledgerList}
               onSwitchLedger={handleSwitchLedger}
               onCreateLedger={handleCreateLedger}
+              onDeleteLedger={handleDeleteLedger}
             />
           ) : profileError ? (
             <div style={{ ...styles.centerFill, color: T.parchment, textAlign: "center", padding: 24 }}>
@@ -758,6 +803,73 @@ function ResetPasswordScreen({ onDone }) {
 }
 
 /* ================================================================
+   COMPLETE PROFILE (mandatory full name, first login — including
+   retroactively for anyone who signed up before this existed)
+================================================================= */
+function CompleteProfileModal({ onSaved }) {
+  const [fullName, setFullName] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e?.preventDefault?.();
+    setError("");
+    const trimmed = fullName.trim();
+    if (!trimmed) return setError("Full name is required.");
+    setBusy(true);
+    try {
+      const { error: err } = await supabase.auth.updateUser({ data: { full_name: trimmed } });
+      if (err) throw err;
+      // The auth listener in App picks up the updated session from here,
+      // which is what actually moves past this screen — this callback just
+      // handles the follow-up work (syncing the name to existing ledgers).
+      onSaved?.(trimmed);
+    } catch (err) {
+      setError(err?.message || "Couldn't save that. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={styles.centerFill}>
+      <div style={styles.loginCardOuter}>
+        <div style={styles.loginCard}>
+          <div style={styles.loginCardAccent} />
+          <div style={{ textAlign: "center", marginBottom: 28 }}>
+            <div style={styles.brandMarkRing}>
+              <div style={styles.brandMarkInner}>
+                <DirhamSymbol size={24} color={T.gold} />
+              </div>
+            </div>
+            <h1 style={styles.wordmark}>One quick thing</h1>
+            <p style={styles.tagline}>let's finish setting up your account</p>
+            <div style={styles.wordDivider} />
+          </div>
+          <label style={styles.label}>Full name</label>
+          <input
+            autoFocus
+            style={styles.textInput}
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSubmit(e)}
+            placeholder="e.g. Sam Rivera"
+            maxLength={60}
+          />
+          <p style={{ fontSize: 12, opacity: 0.55, marginTop: 6 }}>
+            This is how you'll show up to anyone you share a ledger with.
+          </p>
+          {error && <p style={styles.errorText}>{error}</p>}
+          <button type="button" className="btn-lift" style={styles.primaryBtn} disabled={busy} onClick={handleSubmit}>
+            {busy ? "Saving…" : "Continue"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
    MFA CHALLENGE (login-time 2FA prompt)
 ================================================================= */
 function MfaChallengeScreen({ onVerified, onCancel }) {
@@ -828,7 +940,7 @@ function MfaChallengeScreen({ onVerified, onCancel }) {
 /* ================================================================
    DASHBOARD
 ================================================================= */
-function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, onSwitchLedger, onCreateLedger }) {
+function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, onSwitchLedger, onCreateLedger, onDeleteLedger }) {
   const [expenses, setExpenses] = useState(null);
   const [customCategories, setCustomCategories] = useState([]);
   const [monthCursor, setMonthCursor] = useState(() => {
@@ -862,8 +974,10 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [csvImportOpen, setCsvImportOpen] = useState(false);
   const [budgetAlert, setBudgetAlert] = useState(null);
   const [memberNames, setMemberNames] = useState({}); // user_id -> display_name, for "added by" labels
+  const [isLedgerOwner, setIsLedgerOwner] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [paymentSetupOpen, setPaymentSetupOpen] = useState(false);
+  const [gettingStartedOpen, setGettingStartedOpen] = useState(false);
 
   const uid = profile.id;
 
@@ -936,6 +1050,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         const names = {};
         (members || []).forEach((m) => { names[m.user_id] = m.display_name; });
         setMemberNames(names);
+        setIsLedgerOwner((members || []).some((m) => m.user_id === currentUserId && m.role === "owner"));
 
         // Recurring expenses have no server-side cron — generate anything due
         // for the current month right now, the first time anyone opens this
@@ -991,6 +1106,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         const seenKey = `trackit-payment-setup-seen-${uid}`;
         if (profileData.paymentMethods.length === 0 && !localStorage.getItem(seenKey)) {
           setPaymentSetupOpen(true);
+        } else {
+          maybeShowGettingStarted();
         }
       } catch (err) {
         console.error("Track It: failed to load ledger data —", err);
@@ -1044,6 +1161,13 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       setError("Currency saved locally, but syncing failed.");
     }
   }, [uid, profile.isDemo, isOnline]);
+
+  const maybeShowGettingStarted = useCallback(() => {
+    if (profile.isDemo) return;
+    if (!localStorage.getItem(`trackit-onboarding-seen-${uid}`)) {
+      setGettingStartedOpen(true);
+    }
+  }, [uid, profile.isDemo]);
 
   // Ask once, quietly, so a budget-exceeded moment can also show as a browser
   // notification (only while this tab/app is open — real background push
@@ -1391,6 +1515,12 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       });
   }, [categories, monthExpenses, budgets]);
 
+  // Categories with no spending and no budget this month are just noise in
+  // the list — tucked behind "show all" instead of always taking up space.
+  const categoryOverviewActive = useMemo(() => categoryOverview.filter((c) => c.value > 0 || c.budget), [categoryOverview]);
+  const categoryOverviewHiddenCount = categoryOverview.length - categoryOverviewActive.length;
+  const [showAllCategories, setShowAllCategories] = useState(false);
+
   const paymentBreakdown = useMemo(() => {
     const map = {};
     monthExpenses.forEach((x) => {
@@ -1569,8 +1699,10 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         <LedgerSwitcherModal
           ledgerList={ledgerList}
           activeId={uid}
+          isOwner={isLedgerOwner}
           onSwitch={(id) => { onSwitchLedger(id); setLedgerSwitcherOpen(false); }}
           onCreate={async (name) => { await onCreateLedger(name); setLedgerSwitcherOpen(false); }}
+          onDelete={async () => { await onDeleteLedger(uid); setLedgerSwitcherOpen(false); }}
           onClose={() => setLedgerSwitcherOpen(false)}
         />
       )}
@@ -1767,8 +1899,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
               )}
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4, maxHeight: 260, overflowY: "auto" }}>
-              {categoryOverview.map((b) => {
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4, maxHeight: 240, overflowY: "auto" }}>
+              {(showAllCategories ? categoryOverview : categoryOverviewActive).map((b) => {
                 return (
                   <div key={b.name}>
                     <div style={styles.legendRow}>
@@ -1790,6 +1922,15 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                   </div>
                 );
               })}
+              {categoryOverviewHiddenCount > 0 && (
+                <button
+                  type="button"
+                  style={{ ...styles.textBtn, marginTop: 0, textAlign: "left", fontSize: 12.5 }}
+                  onClick={() => setShowAllCategories((v) => !v)}
+                >
+                  {showAllCategories ? "Show less" : `+${categoryOverviewHiddenCount} more categor${categoryOverviewHiddenCount > 1 ? "ies" : "y"}`}
+                </button>
+              )}
             </div>
           </div>
 
@@ -1822,19 +1963,15 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-                {paymentBreakdown.map((b) => {
-                  const Icon = paymentMethodIcon(b.name);
-                  return (
-                    <div key={b.name} style={styles.legendRow}>
-                      <span style={{ ...styles.legendDot, background: b.color }} />
-                      <Icon size={13} style={{ opacity: 0.6, flexShrink: 0 }} />
-                      <span style={{ flex: 1, fontSize: 13.5 }}>{b.name}</span>
-                      <span style={{ fontSize: 13.5, fontFamily: "'IBM Plex Mono', monospace" }}>
-                        <Money amount={b.value} size={12.5} />
-                      </span>
-                    </div>
-                  );
-                })}
+                {paymentBreakdown.map((b) => (
+                  <div key={b.name} style={styles.legendRow}>
+                    <span style={{ ...styles.legendDot, background: b.color }} />
+                    <span style={{ flex: 1, fontSize: 13.5 }}>{b.name}</span>
+                    <span style={{ fontSize: 13.5, fontFamily: "'IBM Plex Mono', monospace" }}>
+                      <Money amount={b.value} size={12.5} />
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -1950,8 +2087,13 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 
           {monthIncome.length > 0 && (
             <div style={{ ...styles.listCard, marginTop: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 13, opacity: 0.6 }}>
-                <TrendingUp size={14} /> Income this month
+              <div style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "14px 18px 10px", fontSize: 12.5, fontWeight: 700,
+                textTransform: "uppercase", letterSpacing: 0.4, opacity: 0.55,
+                borderBottom: `1px solid ${T.parchmentDim}`,
+              }}>
+                <TrendingUp size={13} /> Income this month
               </div>
               {monthIncome.map((x) => (
                 <div key={x.id} className="row-hover" style={styles.expenseRow}>
@@ -2025,12 +2167,21 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
             await persistPaymentMethods(next);
             if (!profile.isDemo) localStorage.setItem(`trackit-payment-setup-seen-${uid}`, "1");
             setPaymentSetupOpen(false);
+            maybeShowGettingStarted();
           }}
           onSkip={() => {
             if (!profile.isDemo) localStorage.setItem(`trackit-payment-setup-seen-${uid}`, "1");
             setPaymentSetupOpen(false);
+            maybeShowGettingStarted();
           }}
         />
+      )}
+
+      {gettingStartedOpen && (
+        <GettingStartedModal onClose={() => {
+          if (!profile.isDemo) localStorage.setItem(`trackit-onboarding-seen-${uid}`, "1");
+          setGettingStartedOpen(false);
+        }} />
       )}
 
       {budgetAlert && (
@@ -2886,6 +3037,64 @@ function PaymentMethodsSetupModal({ existing, onSave, onSkip }) {
 }
 
 /* ================================================================
+   GETTING STARTED (one-time tips after first setup)
+================================================================= */
+function GettingStartedModal({ onClose }) {
+  const tips = [
+    {
+      icon: TrendingUp,
+      title: "Log income too, not just expenses",
+      body: "The green trending-up icon next to \"Log an expense\" records money coming in — salary, freelance work, gifts, whatever. The dashboard shows Spent, Income, and Net together once you have both.",
+    },
+    {
+      icon: Target,
+      title: "Set a budget for each category",
+      body: "Tap the target icon to set an overall monthly budget and per-category limits. You'll get a heads-up, both in the app and as a browser notification, if you go over.",
+    },
+    {
+      icon: BarChart3,
+      title: "Check your trends over time",
+      body: "The bar-chart icon shows the last 12 months of spending vs. income, so patterns are easy to spot instead of buried in a single month's view.",
+    },
+  ];
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: 0 }}>A few things worth knowing</h2>
+          <button type="button" style={styles.iconGhostBtnDark} onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
+          {tips.map((tip, i) => {
+            const Icon = tip.icon;
+            return (
+              <div key={i} style={{ display: "flex", gap: 12 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 10, background: T.parchmentDim,
+                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                }}>
+                  <Icon size={17} color={T.ink} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{tip.title}</div>
+                  <div style={{ fontSize: 13, opacity: 0.7, marginTop: 2, lineHeight: 1.4 }}>{tip.body}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, marginTop: 22 }} onClick={onClose}>
+          Got it, let's go
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
    SETTINGS (profile details + change password)
 ================================================================= */
 function TwoFactorSection() {
@@ -3223,11 +3432,17 @@ function ActivityLogModal({ ledgerId, onClose }) {
 /* ================================================================
    LEDGER SWITCHER
 ================================================================= */
-function LedgerSwitcherModal({ ledgerList, activeId, onSwitch, onCreate, onClose }) {
+function LedgerSwitcherModal({ ledgerList, activeId, isOwner, onSwitch, onCreate, onDelete, onClose }) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  const activeLedger = (ledgerList || []).find((l) => l.id === activeId);
 
   const handleCreate = async (e) => {
     e?.preventDefault?.();
@@ -3240,6 +3455,20 @@ function LedgerSwitcherModal({ ledgerList, activeId, onSwitch, onCreate, onClose
     } catch (err) {
       setError(err?.message || "Couldn't create that ledger. Please try again.");
       setBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleteError("");
+    if (confirmText.trim() !== activeLedger?.name) {
+      return setDeleteError("Type the ledger name exactly to confirm.");
+    }
+    setDeleting(true);
+    try {
+      await onDelete();
+    } catch (err) {
+      setDeleteError(err?.message || "Couldn't delete that ledger. Please try again.");
+      setDeleting(false);
     }
   };
 
@@ -3294,6 +3523,49 @@ function LedgerSwitcherModal({ ledgerList, activeId, onSwitch, onCreate, onClose
                 {busy ? "Creating…" : "Create & switch"}
               </button>
             </div>
+          </div>
+        )}
+
+        {isOwner && activeLedger && (
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${T.parchmentDim}` }}>
+            {!confirmingDelete ? (
+              <button
+                type="button"
+                style={{ ...styles.textBtn, color: T.brick, display: "flex", alignItems: "center", gap: 6 }}
+                onClick={() => setConfirmingDelete(true)}
+              >
+                <Trash2 size={14} /> Delete "{activeLedger.name}"
+              </button>
+            ) : (
+              <div>
+                <p style={{ fontSize: 13, color: T.brick, fontWeight: 600, marginBottom: 4 }}>
+                  This permanently deletes every expense, income entry, budget, and receipt photo in
+                  "{activeLedger.name}" — for every member, not just you. This can't be undone.
+                </p>
+                <label style={styles.label}>Type "{activeLedger.name}" to confirm</label>
+                <input
+                  style={styles.textInput}
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder={activeLedger.name}
+                />
+                {deleteError && <p style={styles.errorText}>{deleteError}</p>}
+                <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                  <button type="button" style={styles.textBtn} onClick={() => { setConfirmingDelete(false); setConfirmText(""); setDeleteError(""); }}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-lift"
+                    style={{ ...styles.primaryBtn, flex: 1, background: T.brick }}
+                    disabled={deleting}
+                    onClick={handleDelete}
+                  >
+                    {deleting ? "Deleting…" : "Delete permanently"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

@@ -97,6 +97,13 @@ create policy "insert own ledger" on ledgers for insert
 create policy "update ledgers you belong to" on ledgers for update
   using (exists (select 1 from ledger_members m where m.ledger_id = ledgers.id and m.user_id = auth.uid()));
 
+-- Only the owner can delete a ledger. Everything else (memberships,
+-- invites, expenses, income, recurring templates, activity log) cascades
+-- automatically via the "on delete cascade" foreign keys already defined
+-- above — deleting the ledgers row is enough.
+create policy "owner can delete ledger" on ledgers for delete
+  using (owner_id = auth.uid());
+
 create policy "select memberships of your ledgers" on ledger_members for select
   using (public.is_ledger_member(ledger_id));
 
