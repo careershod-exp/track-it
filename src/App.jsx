@@ -2278,11 +2278,6 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                       background: monthTotal > budgets.overall ? T.brick : T.sage,
                     }} />
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, fontSize: 11, opacity: 0.6, marginTop: 3 }}>
-                    <span>of</span>
-                    <Money amount={budgets.overall} size={11} />
-                    <span>Budget</span>
-                  </div>
                 </div>
               ) : (
                 <button
@@ -2298,22 +2293,37 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                   <Target size={13} /> No budget set yet — tap to set one
                 </button>
               )}
-              {(monthIncomeTotal > 0 || income.length > 0 || savingsCumulativeTotal !== 0 || savings.length > 0) && (
-                <div style={{ ...styles.incomeSummaryRow, flexWrap: "wrap", justifyContent: "center", gap: 14 }}>
-                  <span style={styles.incomeSummaryItem}>
-                    <span style={{ opacity: 0.6 }}>Income</span> <Money amount={monthIncomeTotal} size={12.5} color={T.sage} />
-                  </span>
-                  {savings.length > 0 && (
-                    <span style={styles.incomeSummaryItem}>
-                      <span style={{ opacity: 0.6 }}>Total savings</span> <Money amount={savingsCumulativeTotal} size={12.5} color={T.gold} />
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, width: "100%", marginTop: 12 }}>
+                {budgets.overall > 0 && (
+                  <div style={{ ...styles.statPill, background: `${T.ink}0d` }}>
+                    <span style={styles.statPillLabel}><Target size={11} /> Budget</span>
+                    <span style={styles.statPillValue}><Money amount={budgets.overall} size={15} /></span>
+                  </div>
+                )}
+                {(monthIncomeTotal > 0 || income.length > 0) && (
+                  <div style={{ ...styles.statPill, background: `${T.sage}1a` }}>
+                    <span style={{ ...styles.statPillLabel, color: T.sage }}><TrendingUp size={11} /> Income</span>
+                    <span style={{ ...styles.statPillValue, color: T.sage }}><Money amount={monthIncomeTotal} size={15} color={T.sage} /></span>
+                  </div>
+                )}
+                {savings.length > 0 && (
+                  <div style={{ ...styles.statPill, background: `${T.gold}1a` }}>
+                    <span style={{ ...styles.statPillLabel, color: "#8a6f1c" }}><PiggyBank size={11} /> Savings</span>
+                    <span style={{ ...styles.statPillValue, color: "#8a6f1c" }}><Money amount={savingsCumulativeTotal} size={15} color="#8a6f1c" /></span>
+                  </div>
+                )}
+                {(monthIncomeTotal > 0 || income.length > 0 || savingsCumulativeTotal !== 0 || savings.length > 0) && (
+                  <div style={{ ...styles.statPill, background: monthNet >= 0 ? `${T.sage}1a` : `${T.brick}1a` }}>
+                    <span style={{ ...styles.statPillLabel, color: monthNet >= 0 ? T.sage : T.brick }}>
+                      <Wallet size={11} /> Net
                     </span>
-                  )}
-                  <span style={styles.incomeSummaryItem}>
-                    <span style={{ opacity: 0.6 }}>Net</span>{" "}
-                    <Money amount={monthNet} size={12.5} color={monthNet >= 0 ? T.sage : T.brick} />
-                  </span>
-                </div>
-              )}
+                    <span style={{ ...styles.statPillValue, color: monthNet >= 0 ? T.sage : T.brick }}>
+                      <Money amount={monthNet} size={15} color={monthNet >= 0 ? T.sage : T.brick} />
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div style={{ height: 150, marginTop: 6 }}>
@@ -4809,6 +4819,15 @@ const styles = {
   totalNumber: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 36, fontWeight: 600, color: T.brick, letterSpacing: -0.5 },
   incomeSummaryRow: { display: "flex", gap: 20, marginTop: 8, fontSize: 13, paddingTop: 12, borderTop: `1px solid ${T.parchmentDim}`, width: "100%", justifyContent: "center" },
   incomeSummaryItem: { display: "flex", alignItems: "center", gap: 5 },
+  statPill: {
+    flex: "1 1 110px", minWidth: 90, borderRadius: 12, padding: "8px 10px",
+    display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+  },
+  statPillLabel: {
+    display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, fontWeight: 700,
+    textTransform: "uppercase", letterSpacing: 0.3, opacity: 0.7,
+  },
+  statPillValue: { fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15 },
   progressTrack: { width: "100%", height: 7, borderRadius: 4, background: T.parchmentDim, overflow: "hidden", boxShadow: "inset 0 1px 2px rgba(0,0,0,0.08)" },
   progressFill: { height: "100%", borderRadius: 4, transition: "width 0.3s ease" },
   emptyRingWrap: { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" },
