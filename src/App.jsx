@@ -2299,9 +2299,9 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, width: "100%", marginTop: 12 }}>
                 {budgets.overall > 0 && (
-                  <div style={{ ...styles.statPill, background: T.forestDeep }}>
-                    <span style={{ ...styles.statPillLabel, color: T.parchment, opacity: 0.75 }}><Target size={11} /> Budget</span>
-                    <span style={{ ...styles.statPillValue, color: T.parchment }}><Money amount={budgets.overall} size={15} color={T.parchment} /></span>
+                  <div style={{ ...styles.statPill, background: "#25344F" }}>
+                    <span style={{ ...styles.statPillLabel, color: "#9DB4D9" }}><Target size={11} /> Budget</span>
+                    <span style={{ ...styles.statPillValue, color: "#9DB4D9" }}><Money amount={budgets.overall} size={15} color="#9DB4D9" /></span>
                   </div>
                 )}
                 {(monthIncomeTotal > 0 || income.length > 0) && (
