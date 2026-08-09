@@ -1875,6 +1875,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const categoryOverviewActive = useMemo(() => categoryOverview.filter((c) => c.value > 0 || c.budget), [categoryOverview]);
   const categoryOverviewHiddenCount = categoryOverview.length - categoryOverviewActive.length;
   const [showAllCategories, setShowAllCategories] = useState(false);
+  const [showAllExpenses, setShowAllExpenses] = useState(false);
+  useEffect(() => { setShowAllExpenses(false); }, [monthCursor, selectedDate, activeFilters, searchQuery]);
 
   const paymentBreakdown = useMemo(() => {
     const map = {};
@@ -2515,13 +2517,21 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           </div>
 
           <div style={styles.listCard}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "14px 18px 10px", fontSize: 12.5, fontWeight: 700,
+              textTransform: "uppercase", letterSpacing: 0.4, opacity: 0.55,
+              borderBottom: `1px solid ${T.parchmentDim}`,
+            }}>
+              <Receipt size={13} /> {selectedDate ? "Expenses that day" : "Expenses this month"}
+            </div>
             {visibleList.length === 0 ? (
               <div style={{ padding: "40px 20px", textAlign: "center", opacity: 0.55 }}>
                 <Receipt size={26} style={{ marginBottom: 8 }} />
                 <p>No expenses match here yet — log one, or clear filters.</p>
               </div>
             ) : (
-              visibleList.map((x) => {
+              (showAllExpenses ? visibleList : visibleList.slice(0, 8)).map((x) => {
                 const idx = categoryColorIndex[x.category] ?? 0;
                 const addedByName = x.addedBy && x.addedBy !== currentUserId ? memberNames[x.addedBy] : null;
                 return (
@@ -2534,27 +2544,29 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                       </div>
                     </div>
                     <div style={styles.rowAmount}><Money amount={Number(x.amount)} size={13.5} /></div>
-                    {x.receiptPath && (
-                      <button
-                        className="row-icon-hover" style={styles.rowIconBtn}
-                        title="View receipt"
-                        onClick={async () => {
-                          setReceiptViewerLoading(true);
-                          setReceiptViewerOpen(true);
-                          try {
-                            const url = await getReceiptUrl(x.receiptPath);
-                            setReceiptViewerUrl(url);
-                          } catch {
-                            setReceiptViewerOpen(false);
-                            setError("Couldn't open that receipt right now.");
-                          } finally {
-                            setReceiptViewerLoading(false);
-                          }
-                        }}
-                      >
-                        <Camera size={14} />
-                      </button>
-                    )}
+                    <div style={{ width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {x.receiptPath && (
+                        <button
+                          className="row-icon-hover" style={styles.rowIconBtn}
+                          title="View receipt"
+                          onClick={async () => {
+                            setReceiptViewerLoading(true);
+                            setReceiptViewerOpen(true);
+                            try {
+                              const url = await getReceiptUrl(x.receiptPath);
+                              setReceiptViewerUrl(url);
+                            } catch {
+                              setReceiptViewerOpen(false);
+                              setError("Couldn't open that receipt right now.");
+                            } finally {
+                              setReceiptViewerLoading(false);
+                            }
+                          }}
+                        >
+                          <Camera size={14} />
+                        </button>
+                      )}
+                    </div>
                     <button className="row-icon-hover" style={styles.rowIconBtn} onClick={() => { setEditingExpense(x); setFormOpen(true); }}>
                       <Pencil size={14} />
                     </button>
@@ -2564,6 +2576,19 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                   </div>
                 );
               })
+            )}
+            {visibleList.length > 8 && (
+              <button
+                type="button"
+                onClick={() => setShowAllExpenses((v) => !v)}
+                style={{
+                  width: "100%", textAlign: "center", padding: "12px 18px", fontSize: 12.5, fontWeight: 700,
+                  border: "none", background: "transparent", color: T.ink, opacity: 0.6, cursor: "pointer",
+                  borderTop: `1px solid ${T.parchmentDim}`,
+                }}
+              >
+                {showAllExpenses ? "Show less" : `Show all ${visibleList.length}`}
+              </button>
             )}
           </div>
 
