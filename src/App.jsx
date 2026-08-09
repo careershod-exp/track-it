@@ -2296,30 +2296,30 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, width: "100%", marginTop: 12 }}>
                 {budgets.overall > 0 && (
-                  <div style={{ ...styles.statPill, background: `${T.ink}0d` }}>
-                    <span style={styles.statPillLabel}><Target size={11} /> Budget</span>
-                    <span style={styles.statPillValue}><Money amount={budgets.overall} size={15} /></span>
+                  <div style={{ ...styles.statPill, background: T.forestDeep }}>
+                    <span style={{ ...styles.statPillLabel, color: T.parchment, opacity: 0.75 }}><Target size={11} /> Budget</span>
+                    <span style={{ ...styles.statPillValue, color: T.parchment }}><Money amount={budgets.overall} size={15} color={T.parchment} /></span>
                   </div>
                 )}
                 {(monthIncomeTotal > 0 || income.length > 0) && (
-                  <div style={{ ...styles.statPill, background: `${T.sage}1a` }}>
-                    <span style={{ ...styles.statPillLabel, color: T.sage }}><TrendingUp size={11} /> Income</span>
-                    <span style={{ ...styles.statPillValue, color: T.sage }}><Money amount={monthIncomeTotal} size={15} color={T.sage} /></span>
+                  <div style={{ ...styles.statPill, background: "#1E3E28" }}>
+                    <span style={{ ...styles.statPillLabel, color: "#8FCB94" }}><TrendingUp size={11} /> Income</span>
+                    <span style={{ ...styles.statPillValue, color: "#8FCB94" }}><Money amount={monthIncomeTotal} size={15} color="#8FCB94" /></span>
                   </div>
                 )}
                 {savings.length > 0 && (
-                  <div style={{ ...styles.statPill, background: `${T.gold}1a` }}>
-                    <span style={{ ...styles.statPillLabel, color: "#8a6f1c" }}><PiggyBank size={11} /> Savings</span>
-                    <span style={{ ...styles.statPillValue, color: "#8a6f1c" }}><Money amount={savingsCumulativeTotal} size={15} color="#8a6f1c" /></span>
+                  <div style={{ ...styles.statPill, background: "#4A3814" }}>
+                    <span style={{ ...styles.statPillLabel, color: "#E8C766" }}><PiggyBank size={11} /> Savings</span>
+                    <span style={{ ...styles.statPillValue, color: "#E8C766" }}><Money amount={savingsCumulativeTotal} size={15} color="#E8C766" /></span>
                   </div>
                 )}
                 {(monthIncomeTotal > 0 || income.length > 0 || savingsCumulativeTotal !== 0 || savings.length > 0) && (
-                  <div style={{ ...styles.statPill, background: monthNet >= 0 ? T.ink : `${T.brick}1a` }}>
-                    <span style={{ ...styles.statPillLabel, color: monthNet >= 0 ? T.parchment : T.brick, opacity: monthNet >= 0 ? 0.75 : 0.7 }}>
+                  <div style={{ ...styles.statPill, background: monthNet >= 0 ? T.ink : "#4A1E24" }}>
+                    <span style={{ ...styles.statPillLabel, color: monthNet >= 0 ? T.parchment : "#E89AA3", opacity: 0.75 }}>
                       <Wallet size={11} /> Net balance
                     </span>
-                    <span style={{ ...styles.statPillValue, color: monthNet >= 0 ? T.parchment : T.brick }}>
-                      <Money amount={monthNet} size={15} color={monthNet >= 0 ? T.parchment : T.brick} />
+                    <span style={{ ...styles.statPillValue, color: monthNet >= 0 ? T.parchment : "#E89AA3" }}>
+                      <Money amount={monthNet} size={15} color={monthNet >= 0 ? T.parchment : "#E89AA3"} />
                     </span>
                   </div>
                 )}
