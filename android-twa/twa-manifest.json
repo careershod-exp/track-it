@@ -1,0 +1,41 @@
+{
+  "packageId": "com.trackituae.app",
+  "host": "www.trackituae.com",
+  "name": "Track It",
+  "launcherName": "Track It",
+  "display": "standalone",
+  "themeColor": "#1c2b22",
+  "navigationColor": "#1c2b22",
+  "navigationColorDark": "#1c2b22",
+  "navigationDividerColor": "#1c2b22",
+  "backgroundColor": "#1c2b22",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://www.trackituae.com/icon-512.png",
+  "maskableIconUrl": "https://www.trackituae.com/icon-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "trackit"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://www.trackituae.com/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {
+    "playBilling": {
+      "enabled": false
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://www.trackituae.com/",
+  "minSdkVersion": 21,
+  "orientation": "default"
+}
