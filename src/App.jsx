@@ -2314,12 +2314,12 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                   </div>
                 )}
                 {(monthIncomeTotal > 0 || income.length > 0 || savingsCumulativeTotal !== 0 || savings.length > 0) && (
-                  <div style={{ ...styles.statPill, background: monthNet >= 0 ? `${T.sage}1a` : `${T.brick}1a` }}>
-                    <span style={{ ...styles.statPillLabel, color: monthNet >= 0 ? T.sage : T.brick }}>
-                      <Wallet size={11} /> Net
+                  <div style={{ ...styles.statPill, background: monthNet >= 0 ? T.ink : `${T.brick}1a` }}>
+                    <span style={{ ...styles.statPillLabel, color: monthNet >= 0 ? T.parchment : T.brick, opacity: monthNet >= 0 ? 0.75 : 0.7 }}>
+                      <Wallet size={11} /> Net balance
                     </span>
-                    <span style={{ ...styles.statPillValue, color: monthNet >= 0 ? T.sage : T.brick }}>
-                      <Money amount={monthNet} size={15} color={monthNet >= 0 ? T.sage : T.brick} />
+                    <span style={{ ...styles.statPillValue, color: monthNet >= 0 ? T.parchment : T.brick }}>
+                      <Money amount={monthNet} size={15} color={monthNet >= 0 ? T.parchment : T.brick} />
                     </span>
                   </div>
                 )}
