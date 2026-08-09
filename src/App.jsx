@@ -1876,7 +1876,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const categoryOverviewHiddenCount = categoryOverview.length - categoryOverviewActive.length;
   const [showAllCategories, setShowAllCategories] = useState(false);
   const [showAllExpenses, setShowAllExpenses] = useState(false);
-  useEffect(() => { setShowAllExpenses(false); }, [monthCursor, selectedDate, activeFilters, searchQuery]);
+  const [showAllIncome, setShowAllIncome] = useState(false);
+  useEffect(() => { setShowAllExpenses(false); setShowAllIncome(false); }, [monthCursor, selectedDate, activeFilters, searchQuery]);
 
   const paymentBreakdown = useMemo(() => {
     const map = {};
@@ -2602,7 +2603,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
               }}>
                 <TrendingUp size={13} /> {selectedDate ? "Income that day" : "Income this month"}
               </div>
-              {visibleIncome.map((x) => (
+              {(showAllIncome ? visibleIncome : visibleIncome.slice(0, 8)).map((x) => (
                 <div key={x.id} className="row-hover" style={styles.expenseRow}>
                   <span style={{ ...styles.rowDot, background: T.sage }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -2615,6 +2616,19 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                   </button>
                 </div>
               ))}
+              {visibleIncome.length > 8 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllIncome((v) => !v)}
+                  style={{
+                    width: "100%", textAlign: "center", padding: "12px 18px", fontSize: 12.5, fontWeight: 700,
+                    border: "none", background: "transparent", color: T.ink, opacity: 0.6, cursor: "pointer",
+                    borderTop: `1px solid ${T.parchmentDim}`,
+                  }}
+                >
+                  {showAllIncome ? "Show less" : `Show all ${visibleIncome.length}`}
+                </button>
+              )}
             </div>
           )}
         </section>
