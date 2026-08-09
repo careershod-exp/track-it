@@ -1159,6 +1159,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [paymentSetupOpen, setPaymentSetupOpen] = useState(false);
   const [gettingStartedOpen, setGettingStartedOpen] = useState(false);
+  const [chainToBudgetAfterIncome, setChainToBudgetAfterIncome] = useState(false);
 
   const uid = profile.id;
 
@@ -1604,17 +1605,25 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     setPendingDelete(null);
   };
 
+  const finishIncomeForm = () => {
+    setIncomeFormOpen(false);
+    if (chainToBudgetAfterIncome) {
+      setChainToBudgetAfterIncome(false);
+      setBudgetFormOpen(true);
+    }
+  };
+
   const handleAddIncome = async (payload) => {
     const localId = `${isOnline ? "tmp" : "offline"}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const entry = { id: localId, createdAt: Date.now(), ...payload, ...(isOnline ? {} : { pendingSync: true }) };
     setIncome((cur) => [entry, ...cur]);
-    if (profile.isDemo) { setIncomeFormOpen(false); return; }
+    if (profile.isDemo) { finishIncomeForm(); return; }
     if (!isOnline) {
       const queue = loadOfflineQueue(uid);
       queue.push({ localId, type: "income", payload, createdAt: Date.now() });
       saveOfflineQueue(uid, queue);
       setPendingSyncCount(queue.length);
-      setIncomeFormOpen(false);
+      finishIncomeForm();
       return;
     }
     try {
@@ -1624,7 +1633,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     } catch {
       setError("Saved locally, but syncing failed.");
     }
-    setIncomeFormOpen(false);
+    finishIncomeForm();
   };
 
   const handleDeleteIncome = async (id) => {
@@ -2126,7 +2135,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
             <div style={{ ...styles.totalRow, marginBottom: 4 }}>
               <span style={{ fontSize: 12.5, opacity: 0.6 }}>Spent this month</span>
               <span style={{ ...styles.totalNumber, fontSize: 28 }}><Money amount={monthTotal} size={22} /></span>
-              {budgets.overall > 0 && (
+              {budgets.overall > 0 ? (
                 <div style={{ width: "100%", marginTop: 6 }}>
                   <div style={styles.progressTrack}>
                     <div style={{
@@ -2141,6 +2150,19 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                     <span>Budget</span>
                   </div>
                 </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setBudgetFormOpen(true)}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    width: "100%", marginTop: 8, padding: "8px 10px", borderRadius: 10,
+                    border: `1.5px dashed ${T.parchmentDim}`, background: "transparent",
+                    color: T.ink, opacity: 0.75, fontSize: 12, cursor: "pointer",
+                  }}
+                >
+                  <Target size={13} /> No budget set yet — tap to set one
+                </button>
               )}
               {(monthIncomeTotal > 0 || income.length > 0 || monthSavingsTotal > 0 || savings.length > 0) && (
                 <div style={{ ...styles.incomeSummaryRow, flexWrap: "wrap", justifyContent: "center", gap: 14 }}>
@@ -2445,7 +2467,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 
       {incomeFormOpen && (
         <IncomeForm
-          onCancel={() => setIncomeFormOpen(false)}
+          onCancel={() => { setIncomeFormOpen(false); setChainToBudgetAfterIncome(false); }}
           onSave={handleAddIncome}
         />
       )}
@@ -2546,6 +2568,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           onOpenIncome={() => {
             if (!profile.isDemo) localStorage.setItem(`trackit-onboarding-seen-${uid}`, "1");
             setGettingStartedOpen(false);
+            setChainToBudgetAfterIncome(true);
             setIncomeFormOpen(true);
           }}
         />
@@ -3022,12 +3045,15 @@ function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete
         {activeTemplates.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
             {activeTemplates.map((t) => (
-              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
+              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <Repeat size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-                <span style={{ flex: 1 }}>
-                  {isIncome ? t.source : t.category} · <Money amount={t.amount} size={13} /> · Day {t.dayOfMonth}
-                  {t.note ? ` · ${t.note}` : ""}
-                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{isIncome ? t.source : t.category}</div>
+                  <div style={{ fontSize: 12, opacity: 0.6 }}>
+                    Day {t.dayOfMonth}{t.note ? ` · ${t.note}` : ""}
+                  </div>
+                </div>
+                <Money amount={t.amount} size={13.5} />
                 <button className="row-icon-hover" style={styles.rowIconBtn} onClick={() => (isIncome ? onDeleteIncome(t.id) : onDelete(t.id))} title="Remove">
                   <X size={14} />
                 </button>
