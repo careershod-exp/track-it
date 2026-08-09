@@ -150,6 +150,23 @@ function DirhamSymbol({ size = 13, color = "currentColor", style }) {
   );
 }
 
+function TLogo({ size = 20, color = "currentColor", ringColor, style }) {
+  // Matches the app's actual icon (public/favicon.svg): a serif "T" inside
+  // a ring. Used everywhere the app's brand mark appears on its own —
+  // header, login/setup screens — as opposed to the Dirham symbol, which
+  // is reserved for places that show an actual money amount.
+  return (
+    <svg
+      width={size} height={size} viewBox="0 0 100 100"
+      style={{ display: "inline-block", flexShrink: 0, ...style }}
+      aria-label="Track It"
+    >
+      <circle cx="50" cy="50" r="30" fill="none" stroke={ringColor || color} strokeWidth="4" />
+      <text x="50" y="62" fontFamily="Georgia, serif" fontSize="34" fill={color} textAnchor="middle">T</text>
+    </svg>
+  );
+}
+
 function Money({ amount, size = 13, color, style }) {
   const { code, symbol } = useContext(CurrencyContext);
   return (
@@ -548,7 +565,7 @@ export default function App() {
 function BootScreen() {
   return (
     <div style={{ ...styles.centerFill, color: T.parchment }}>
-      <DirhamSymbol size={26} color={T.parchment} style={{ opacity: 0.6 }} />
+      <TLogo size={26} color={T.parchment} style={{ opacity: 0.6 }} />
       <div style={{ fontFamily: "'Fraunces', serif", fontSize: 18, marginTop: 10, letterSpacing: 0.5 }}>
         Opening Track It…
       </div>
@@ -656,7 +673,7 @@ function AuthScreen({ onLogin }) {
           <div style={{ textAlign: "center", marginBottom: 28 }}>
             <div style={styles.brandMarkRing}>
               <div style={styles.brandMarkInner}>
-                <DirhamSymbol size={24} color={T.gold} />
+                <TLogo size={24} color={T.gold} />
               </div>
             </div>
             <h1 style={styles.wordmark}>Track It</h1>
@@ -803,7 +820,7 @@ function ResetPasswordScreen({ onDone }) {
           <div style={{ textAlign: "center", marginBottom: 28 }}>
             <div style={styles.brandMarkRing}>
               <div style={styles.brandMarkInner}>
-                <DirhamSymbol size={24} color={T.gold} />
+                <TLogo size={24} color={T.gold} />
               </div>
             </div>
             <h1 style={styles.wordmark}>Set a new password</h1>
@@ -899,7 +916,7 @@ function CompleteProfileModal({ onSaved }) {
           <div style={{ textAlign: "center", marginBottom: 24 }}>
             <div style={styles.brandMarkRing}>
               <div style={styles.brandMarkInner}>
-                <DirhamSymbol size={24} color={T.gold} />
+                <TLogo size={24} color={T.gold} />
               </div>
             </div>
             <h1 style={styles.wordmark}>A few quick things</h1>
@@ -2017,7 +2034,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     <div style={styles.dashboardWrap}>
       <header style={styles.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <DirhamSymbol size={20} color={T.gold} />
+          <TLogo size={20} color={T.gold} />
           <h1 style={styles.wordmarkSmall}>Track It</h1>
         </div>
         <div style={styles.headerToolbar}>
