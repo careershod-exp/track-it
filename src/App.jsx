@@ -2246,21 +2246,25 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
             <button style={{ ...styles.addBtnSecondary, flex: 1 }} onClick={() => setIncomeFormOpen(true)}>
               <TrendingUp size={17} /> Log an income
             </button>
-            {!profile.isDemo && (
-              <button style={styles.secondaryIconBtn} onClick={() => setRecurringOpen(true)} title="Recurring expenses & income">
-                <Repeat size={18} />
+            <button style={{ ...styles.addBtnSecondary, flex: 1, background: T.ink }} onClick={() => setBudgetFormOpen(true)}>
+              <Target size={17} /> Set budget
+            </button>
+          </div>
+
+          {!profile.isDemo && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button style={{ ...styles.secondaryIconBtn, flex: 1 }} onClick={() => setRecurringOpen(true)} title="Recurring expenses & income">
+                <Repeat size={16} /> <span style={{ fontSize: 12.5, fontWeight: 600 }}>Recurring</span>
               </button>
-            )}
-            {!profile.isDemo && (
               <button
-                style={{ ...styles.secondaryIconBtn, ...(isOnline ? {} : { opacity: 0.4, cursor: "not-allowed" }) }}
+                style={{ ...styles.secondaryIconBtn, flex: 1, ...(isOnline ? {} : { opacity: 0.4, cursor: "not-allowed" }) }}
                 onClick={() => isOnline ? setCsvImportOpen(true) : setError("Importing needs an internet connection.")}
                 title="Import from a bank CSV"
               >
-                <Upload size={18} />
+                <Upload size={16} /> <span style={{ fontSize: 12.5, fontWeight: 600 }}>Import CSV</span>
               </button>
-            )}
-          </div>
+            </div>
+          )}
 
           <div style={{ ...styles.card, padding: "14px 18px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -4490,9 +4494,9 @@ const styles = {
     fontSize: 14.5, fontWeight: 700, cursor: "pointer", boxShadow: "0 6px 16px rgba(94,140,97,0.3)",
   },
   secondaryIconBtn: {
-    display: "flex", alignItems: "center", justifyContent: "center",
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
     background: T.parchment, color: T.ink, border: `1px solid ${T.parchmentDim}`, borderRadius: 14,
-    padding: "0 16px", cursor: "pointer", boxShadow: "0 2px 8px rgba(15,35,31,0.15)",
+    padding: "11px 16px", cursor: "pointer", boxShadow: "0 2px 8px rgba(15,35,31,0.15)",
   },
   searchRow: {
     display: "flex", alignItems: "center", gap: 8, background: T.parchment,
