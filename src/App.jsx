@@ -8,7 +8,7 @@ import {
   MoreHorizontal, Plus, Trash2, Pencil, LogOut, X, Check,
   ChevronLeft, ChevronRight, Receipt, Target, AlertTriangle, Send, Download, Users, Mail, FileSpreadsheet,
   Banknote, CreditCard, Landmark, Wallet, ChevronDown, BookMarked, Settings, KeyRound,
-  TrendingUp, Repeat, Search, RotateCcw, BarChart3, History, ShieldCheck, Camera, WifiOff, ImageOff, Upload,
+  TrendingUp, Repeat, Search, RotateCcw, BarChart3, History, ShieldCheck, Camera, WifiOff, ImageOff, Upload, PiggyBank,
 } from "lucide-react";
 import Papa from "papaparse";
 import { supabase } from "./supabaseClient";
@@ -21,6 +21,8 @@ import {
   fetchRecurringExpenses, createRecurringExpense, deleteRecurringExpense, markRecurringGenerated,
   logActivity, fetchActivityLog, saveCurrencyRemote, uploadReceipt, getReceiptUrl, deleteReceipt,
   deleteLedger, updateMemberDisplayName,
+  fetchSavings, insertSavingsRemote, deleteSavingsRemote,
+  fetchRecurringIncome, createRecurringIncome, deleteRecurringIncome, markRecurringIncomeGenerated,
 } from "./store";
 
 /* ---------------------------------------------------------------
@@ -81,6 +83,39 @@ const CURRENCIES = [
 ];
 
 const CurrencyContext = React.createContext({ code: "AED", symbol: "AED" });
+
+// A practical, commonly-used country list rather than an exhaustive ISO
+// list — United Arab Emirates is first since it's this app's default and
+// primary audience; the rest are alphabetical.
+const COUNTRIES = [
+  "United Arab Emirates",
+  "Afghanistan", "Albania", "Algeria", "Argentina", "Armenia", "Australia", "Austria",
+  "Azerbaijan", "Bahrain", "Bangladesh", "Belgium", "Bhutan", "Bosnia and Herzegovina",
+  "Brazil", "Brunei", "Bulgaria", "Cambodia", "Cameroon", "Canada", "Chile", "China",
+  "Colombia", "Croatia", "Cyprus", "Czechia", "Denmark", "Egypt", "Estonia", "Ethiopia",
+  "Finland", "France", "Georgia", "Germany", "Ghana", "Greece", "Hong Kong", "Hungary",
+  "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel", "Italy", "Japan",
+  "Jordan", "Kazakhstan", "Kenya", "Kuwait", "Kyrgyzstan", "Latvia", "Lebanon", "Libya",
+  "Lithuania", "Luxembourg", "Malaysia", "Maldives", "Malta", "Mauritius", "Mexico",
+  "Mongolia", "Morocco", "Myanmar", "Nepal", "Netherlands", "New Zealand", "Nigeria",
+  "North Macedonia", "Norway", "Oman", "Pakistan", "Palestine", "Philippines", "Poland",
+  "Portugal", "Qatar", "Romania", "Russia", "Saudi Arabia", "Serbia", "Singapore",
+  "Slovakia", "Slovenia", "South Africa", "South Korea", "Spain", "Sri Lanka", "Sudan",
+  "Sweden", "Switzerland", "Syria", "Taiwan", "Tajikistan", "Tanzania", "Thailand",
+  "Tunisia", "Turkey", "Turkmenistan", "Uganda", "Ukraine", "United Kingdom",
+  "United States", "Uzbekistan", "Vietnam", "Yemen", "Other",
+];
+
+// A real dropdown of states/provinces for every country isn't practical
+// here — this covers the app's default/primary market (UAE's seven
+// emirates) properly; any other country falls back to a free-text field
+// in the UI instead of a dropdown.
+const STATE_OPTIONS = {
+  "United Arab Emirates": ["Abu Dhabi", "Dubai", "Sharjah", "Ajman", "Umm Al Quwain", "Ras Al Khaimah", "Fujairah"],
+};
+
+const AGE_RANGES = ["18-25", "26-35", "36-50", "50+"];
+const GENDER_OPTIONS = ["Male", "Female", "Prefer not to say"];
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -807,23 +842,48 @@ function ResetPasswordScreen({ onDone }) {
    retroactively for anyone who signed up before this existed)
 ================================================================= */
 function CompleteProfileModal({ onSaved }) {
-  const [fullName, setFullName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [country, setCountry] = useState("United Arab Emirates");
+  const [state, setState] = useState("");
+  const [ageRange, setAgeRange] = useState("");
+  const [gender, setGender] = useState("");
+  const [consent, setConsent] = useState(false);
+  const [policyOpen, setPolicyOpen] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const stateOptions = STATE_OPTIONS[country];
 
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
     setError("");
-    const trimmed = fullName.trim();
-    if (!trimmed) return setError("Full name is required.");
+    const first = firstName.trim();
+    const last = lastName.trim();
+    if (!first) return setError("First name is required.");
+    if (!last) return setError("Last name is required.");
+    if (!country) return setError("Country is required.");
+    if (!ageRange) return setError("Please select your age range.");
+    if (!consent) return setError("Please check the box to agree before continuing.");
     setBusy(true);
     try {
-      const { error: err } = await supabase.auth.updateUser({ data: { full_name: trimmed } });
+      const { error: err } = await supabase.auth.updateUser({
+        data: {
+          first_name: first,
+          last_name: last,
+          full_name: `${first} ${last}`,
+          country,
+          state: state.trim() || null,
+          age_range: ageRange,
+          gender: gender || null,
+          profile_consent_at: new Date().toISOString(),
+        },
+      });
       if (err) throw err;
       // The auth listener in App picks up the updated session from here,
       // which is what actually moves past this screen — this callback just
       // handles the follow-up work (syncing the name to existing ledgers).
-      onSaved?.(trimmed);
+      onSaved?.(`${first} ${last}`);
     } catch (err) {
       setError(err?.message || "Couldn't save that. Please try again.");
     } finally {
@@ -836,34 +896,149 @@ function CompleteProfileModal({ onSaved }) {
       <div style={styles.loginCardOuter}>
         <div style={styles.loginCard}>
           <div style={styles.loginCardAccent} />
-          <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ textAlign: "center", marginBottom: 24 }}>
             <div style={styles.brandMarkRing}>
               <div style={styles.brandMarkInner}>
                 <DirhamSymbol size={24} color={T.gold} />
               </div>
             </div>
-            <h1 style={styles.wordmark}>One quick thing</h1>
+            <h1 style={styles.wordmark}>A few quick things</h1>
             <p style={styles.tagline}>let's finish setting up your account</p>
             <div style={styles.wordDivider} />
           </div>
-          <label style={styles.label}>Full name</label>
+
+          <label style={styles.label}>First name</label>
           <input
             autoFocus
             style={styles.textInput}
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit(e)}
-            placeholder="e.g. Sam Rivera"
-            maxLength={60}
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+            placeholder="e.g. Sam"
+            maxLength={40}
           />
-          <p style={{ fontSize: 12, opacity: 0.55, marginTop: 6 }}>
-            This is how you'll show up to anyone you share a ledger with.
-          </p>
+
+          <label style={styles.label}>Last name</label>
+          <input
+            style={styles.textInput}
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+            placeholder="e.g. Rivera"
+            maxLength={40}
+          />
+
+          <label style={styles.label}>Country</label>
+          <select
+            style={styles.select}
+            value={country}
+            onChange={(e) => { setCountry(e.target.value); setState(""); }}
+          >
+            {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+
+          <label style={styles.label}>State / Emirate (optional)</label>
+          {stateOptions ? (
+            <select style={styles.select} value={state} onChange={(e) => setState(e.target.value)}>
+              <option value="">Select</option>
+              {stateOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          ) : (
+            <input
+              style={styles.textInput}
+              value={state}
+              onChange={(e) => setState(e.target.value)}
+              placeholder="e.g. California"
+              maxLength={40}
+            />
+          )}
+
+          <label style={styles.label}>Age range</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {AGE_RANGES.map((r) => (
+              <button
+                key={r}
+                type="button"
+                style={{ ...styles.chip, borderColor: ageRange === r ? T.gold : "transparent" }}
+                onClick={() => setAgeRange(r)}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+
+          <label style={styles.label}>Gender (optional)</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {GENDER_OPTIONS.map((g) => (
+              <button
+                key={g}
+                type="button"
+                style={{ ...styles.chip, borderColor: gender === g ? T.gold : "transparent" }}
+                onClick={() => setGender(g)}
+              >
+                {g}
+              </button>
+            ))}
+          </div>
+
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 18, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+              style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }}
+            />
+            <span style={{ fontSize: 12.5, opacity: 0.75, lineHeight: 1.4, textAlign: "left" }}>
+              I agree to the collection of this information as described in the{" "}
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); setPolicyOpen(true); }}
+                style={{ background: "none", border: "none", padding: 0, color: T.ink, fontWeight: 700, textDecoration: "underline", cursor: "pointer", fontSize: "inherit" }}
+              >
+                Data & Privacy Policy
+              </button>.
+            </span>
+          </label>
+
           {error && <p style={styles.errorText}>{error}</p>}
           <button type="button" className="btn-lift" style={styles.primaryBtn} disabled={busy} onClick={handleSubmit}>
             {busy ? "Saving…" : "Continue"}
           </button>
         </div>
+      </div>
+
+      {policyOpen && <DataPolicyModal onClose={() => setPolicyOpen(false)} />}
+    </div>
+  );
+}
+
+/* ================================================================
+   DATA & PRIVACY POLICY (linked from the consent checkbox above)
+================================================================= */
+function DataPolicyModal({ onClose }) {
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 19, margin: 0 }}>Data & Privacy Policy</h2>
+          <button type="button" style={styles.iconGhostBtnDark} onClick={onClose}><X size={18} /></button>
+        </div>
+        <div style={{ fontSize: 13, lineHeight: 1.55, opacity: 0.85, marginTop: 8 }}>
+          <p><strong>What we collect.</strong> Your name, country, state/emirate, age range, and gender if you
+          choose to share it (collected once, at sign-up), your email address, and the expense, income, and budget
+          data you choose to enter.</p>
+          <p><strong>Why.</strong> Your name identifies you to anyone you share a ledger with. Country, state, age
+          range, and gender help us understand our users in aggregate — they're never required to use any specific feature
+          of the app. Your financial entries are used only to run the app for you and anyone you've shared a ledger
+          with.</p>
+          <p><strong>Storage.</strong> Data is stored with Supabase and never sold or shared with third parties for
+          marketing.</p>
+          <p><strong>Your rights.</strong> Under the UAE's Personal Data Protection Law (Federal Decree-Law No. 45
+          of 2021), you can access, correct, or delete your personal data, and withdraw this consent, at any time —
+          from Settings, or by contacting us using the link in the footer. Withdrawing consent doesn't affect the
+          lawfulness of anything already processed beforehand.</p>
+        </div>
+        <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, marginTop: 14 }} onClick={onClose}>
+          Close
+        </button>
       </div>
     </div>
   );
@@ -960,8 +1135,11 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [income, setIncome] = useState([]);
   const [incomeFormOpen, setIncomeFormOpen] = useState(false);
+  const [savings, setSavings] = useState([]);
+  const [savingsFormOpen, setSavingsFormOpen] = useState(false);
   const [recurringOpen, setRecurringOpen] = useState(false);
   const [recurringTemplates, setRecurringTemplates] = useState([]);
+  const [recurringIncomeTemplates, setRecurringIncomeTemplates] = useState([]);
   const [recurringNotice, setRecurringNotice] = useState("");
   const [trendsOpen, setTrendsOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
@@ -972,6 +1150,9 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [csvImportOpen, setCsvImportOpen] = useState(false);
+  const [receiptViewerOpen, setReceiptViewerOpen] = useState(false);
+  const [receiptViewerUrl, setReceiptViewerUrl] = useState("");
+  const [receiptViewerLoading, setReceiptViewerLoading] = useState(false);
   const [budgetAlert, setBudgetAlert] = useState(null);
   const [memberNames, setMemberNames] = useState({}); // user_id -> display_name, for "added by" labels
   const [isLedgerOwner, setIsLedgerOwner] = useState(false);
@@ -1034,19 +1215,21 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           return;
         }
 
-        const [profileData, expenseRows, members, incomeRows, recurringRows] = await withTimeout(
+        const [profileData, expenseRows, members, incomeRows, recurringRows, savingsRows, recurringIncomeRows] = await withTimeout(
           Promise.all([
             fetchLedgerData(uid), fetchExpenses(uid), fetchMembers(uid).catch(() => []),
             fetchIncome(uid).catch(() => []), fetchRecurringExpenses(uid).catch(() => []),
+            fetchSavings(uid).catch(() => []), fetchRecurringIncome(uid).catch(() => []),
           ]),
           8000
         );
         let finalExpenses = expenseRows;
+        let finalIncome = incomeRows;
         setCustomCategories(profileData.categories);
         setBudgets(profileData.budgets);
         setPaymentMethods(profileData.paymentMethods);
         setCurrency(profileData.currency || "AED");
-        setIncome([...pendingIncome, ...incomeRows]);
+        setSavings(savingsRows);
         const names = {};
         (members || []).forEach((m) => { names[m.user_id] = m.display_name; });
         setMemberNames(names);
@@ -1088,13 +1271,48 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         } else {
           setRecurringTemplates(finalRecurring);
         }
+
+        // Same lazy generation, for recurring income.
+        const dueIncome = recurringIncomeRows.filter((r) => r.lastGeneratedMonth !== nowMonthStr);
+        let finalRecurringIncome = recurringIncomeRows;
+        if (dueIncome.length > 0) {
+          const generatedIncome = [];
+          const succeededIncomeIds = new Set();
+          for (const template of dueIncome) {
+            try {
+              const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+              const day = Math.min(template.dayOfMonth || 1, daysInMonth);
+              const dateStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+              const saved = await insertIncomeRemote(uid, currentUserId, {
+                source: template.source, note: template.note, amount: template.amount, date: dateStr,
+              });
+              await markRecurringIncomeGenerated(template.id, nowMonthStr);
+              generatedIncome.push(saved);
+              succeededIncomeIds.add(template.id);
+            } catch {
+              // Skip a failed template rather than blocking the rest — it'll retry next load.
+            }
+          }
+          if (generatedIncome.length > 0) {
+            finalIncome = [...generatedIncome, ...finalIncome];
+            setRecurringNotice((prev) => {
+              const msg = `Added ${generatedIncome.length} recurring income entr${generatedIncome.length > 1 ? "ies" : "y"} for this month.`;
+              return prev ? `${prev} ${msg}` : msg;
+            });
+          }
+          finalRecurringIncome = recurringIncomeRows.map((r) => (
+            succeededIncomeIds.has(r.id) ? { ...r, lastGeneratedMonth: nowMonthStr } : r
+          ));
+        }
+        setRecurringIncomeTemplates(finalRecurringIncome);
+        setIncome([...pendingIncome, ...finalIncome]);
         setExpenses([...pendingExpenses, ...finalExpenses]);
 
         saveOfflineCache(uid, {
           categories: profileData.categories, budgets: profileData.budgets,
           paymentMethods: profileData.paymentMethods, currency: profileData.currency || "AED",
           memberNames: names, recurringTemplates: finalRecurring,
-          expenses: finalExpenses, income: incomeRows,
+          expenses: finalExpenses, income: finalIncome,
         });
 
         if (queuedItems.length > 0) flushQueue();
@@ -1431,6 +1649,33 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     }
   };
 
+  const handleAddSavings = async (payload) => {
+    if (!isOnline) { setError("Logging savings needs an internet connection."); return; }
+    const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const entry = { id: tempId, createdAt: Date.now(), ...payload };
+    setSavings((cur) => [entry, ...cur]);
+    if (profile.isDemo) { setSavingsFormOpen(false); return; }
+    try {
+      const saved = await withTimeout(insertSavingsRemote(uid, currentUserId, entry), 8000);
+      setSavings((cur) => cur.map((x) => (x.id === tempId ? saved : x)));
+      logActivity(uid, currentUserId, myDisplayName, `logged savings (${fmtMoneyLocal(payload.amount)})`).catch(() => {});
+    } catch {
+      setError("Saved locally, but syncing failed.");
+    }
+    setSavingsFormOpen(false);
+  };
+
+  const handleDeleteSavings = async (id) => {
+    if (!isOnline) { setError("Deleting needs an internet connection."); return; }
+    setSavings((cur) => cur.filter((x) => x.id !== id));
+    if (profile.isDemo) return;
+    try {
+      await withTimeout(deleteSavingsRemote(id), 8000);
+    } catch {
+      setError("Removed locally, but syncing the delete failed.");
+    }
+  };
+
   const handleAddRecurring = async (template) => {
     if (profile.isDemo) return;
     if (!isOnline) throw new Error("This needs an internet connection.");
@@ -1447,6 +1692,25 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       await deleteRecurringExpense(id);
     } catch {
       setError("Couldn't remove that recurring expense. Please try again.");
+    }
+  };
+
+  const handleAddRecurringIncome = async (template) => {
+    if (profile.isDemo) return;
+    if (!isOnline) throw new Error("This needs an internet connection.");
+    const created = await createRecurringIncome(uid, currentUserId, template);
+    setRecurringIncomeTemplates((cur) => [...cur, created]);
+    logActivity(uid, currentUserId, myDisplayName, `set up recurring income "${template.source}" (${fmtMoneyLocal(template.amount)}/month)`).catch(() => {});
+  };
+
+  const handleDeleteRecurringIncome = async (id) => {
+    if (!isOnline) { setError("Removing recurring income needs an internet connection."); return; }
+    setRecurringIncomeTemplates((cur) => cur.filter((x) => x.id !== id));
+    if (profile.isDemo) return;
+    try {
+      await deleteRecurringIncome(id);
+    } catch {
+      setError("Couldn't remove that recurring income. Please try again.");
     }
   };
 
@@ -1540,7 +1804,20 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   }, [income, monthCursor]);
 
   const monthIncomeTotal = useMemo(() => monthIncome.reduce((s, x) => s + Number(x.amount), 0), [monthIncome]);
-  const monthNet = monthIncomeTotal - monthTotal;
+
+  const monthSavings = useMemo(() => {
+    return savings.filter((x) => {
+      const d = new Date(x.date + "T00:00:00");
+      return d.getFullYear() === monthCursor.getFullYear() && d.getMonth() === monthCursor.getMonth();
+    });
+  }, [savings, monthCursor]);
+
+  const monthSavingsTotal = useMemo(() => monthSavings.reduce((s, x) => s + Number(x.amount), 0), [monthSavings]);
+
+  // Money moved to savings counts against available cash the same way an
+  // expense does — it's tracked in its own area so it's visible separately,
+  // but it still reduces what's actually left over this month.
+  const monthNet = monthIncomeTotal - monthTotal - monthSavingsTotal;
 
   const trendData = useMemo(() => {
     const months = [];
@@ -1836,8 +2113,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 
       <main className="main-grid" style={styles.mainGrid}>
         <section style={styles.leftCol}>
-          <div style={styles.card}>
-            <div style={styles.monthNav}>
+          <div style={{ ...styles.card, padding: "16px 18px" }}>
+            <div style={{ ...styles.monthNav, marginBottom: 6 }}>
               <button style={styles.iconGhostBtnDark} onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))}>
                 <ChevronLeft size={18} />
               </button>
@@ -1846,11 +2123,11 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                 <ChevronRight size={18} />
               </button>
             </div>
-            <div style={styles.totalRow}>
-              <span style={{ fontSize: 13, opacity: 0.6 }}>Spent this month</span>
-              <span style={styles.totalNumber}><Money amount={monthTotal} size={26} /></span>
+            <div style={{ ...styles.totalRow, marginBottom: 4 }}>
+              <span style={{ fontSize: 12.5, opacity: 0.6 }}>Spent this month</span>
+              <span style={{ ...styles.totalNumber, fontSize: 28 }}><Money amount={monthTotal} size={22} /></span>
               {budgets.overall > 0 && (
-                <div style={{ width: "100%", marginTop: 8 }}>
+                <div style={{ width: "100%", marginTop: 6 }}>
                   <div style={styles.progressTrack}>
                     <div style={{
                       ...styles.progressFill,
@@ -1858,31 +2135,36 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                       background: monthTotal > budgets.overall ? T.brick : T.sage,
                     }} />
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, fontSize: 11.5, opacity: 0.6, marginTop: 4 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, fontSize: 11, opacity: 0.6, marginTop: 3 }}>
                     <span>of</span>
                     <Money amount={budgets.overall} size={11} />
                     <span>Budget</span>
                   </div>
                 </div>
               )}
-              {(monthIncomeTotal > 0 || income.length > 0) && (
-                <div style={styles.incomeSummaryRow}>
+              {(monthIncomeTotal > 0 || income.length > 0 || monthSavingsTotal > 0 || savings.length > 0) && (
+                <div style={{ ...styles.incomeSummaryRow, flexWrap: "wrap", justifyContent: "center", gap: 14 }}>
                   <span style={styles.incomeSummaryItem}>
-                    <span style={{ opacity: 0.6 }}>Income</span> <Money amount={monthIncomeTotal} size={13} color={T.sage} />
+                    <span style={{ opacity: 0.6 }}>Income</span> <Money amount={monthIncomeTotal} size={12.5} color={T.sage} />
                   </span>
+                  {(monthSavingsTotal > 0 || savings.length > 0) && (
+                    <span style={styles.incomeSummaryItem}>
+                      <span style={{ opacity: 0.6 }}>Savings</span> <Money amount={monthSavingsTotal} size={12.5} color={T.gold} />
+                    </span>
+                  )}
                   <span style={styles.incomeSummaryItem}>
                     <span style={{ opacity: 0.6 }}>Net</span>{" "}
-                    <Money amount={monthNet} size={13} color={monthNet >= 0 ? T.sage : T.brick} />
+                    <Money amount={monthNet} size={12.5} color={monthNet >= 0 ? T.sage : T.brick} />
                   </span>
                 </div>
               )}
             </div>
 
-            <div style={{ height: 200, marginTop: 8 }}>
+            <div style={{ height: 150, marginTop: 6 }}>
               {breakdown.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={breakdown} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78} paddingAngle={2}>
+                    <Pie data={breakdown} dataKey="value" nameKey="name" innerRadius={36} outerRadius={60} paddingAngle={2}>
                       {breakdown.map((entry, i) => <Cell key={i} fill={entry.color} stroke="none" />)}
                     </Pie>
                     <Tooltip formatter={(v) => fmtMoneyLocal(v)} contentStyle={{ background: T.ink, border: "none", borderRadius: 8, color: T.parchment, fontSize: 13 }} />
@@ -1890,8 +2172,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                 </ResponsiveContainer>
               ) : (
                 <div style={styles.emptyRingWrap}>
-                  <div style={styles.emptyRing}>
-                    <span style={{ fontSize: 11.5, opacity: 0.5, textAlign: "center", padding: "0 10px" }}>
+                  <div style={{ ...styles.emptyRing, width: 100, height: 100 }}>
+                    <span style={{ fontSize: 11, opacity: 0.5, textAlign: "center", padding: "0 10px" }}>
                       no spending logged yet
                     </span>
                   </div>
@@ -1899,15 +2181,15 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
               )}
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4, maxHeight: 240, overflowY: "auto" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 4, maxHeight: 200, overflowY: "auto" }}>
               {(showAllCategories ? categoryOverview : categoryOverviewActive).map((b) => {
                 return (
                   <div key={b.name}>
                     <div style={styles.legendRow}>
                       <span style={{ ...styles.legendDot, background: b.color }} />
-                      <span style={{ flex: 1, fontSize: 13.5 }}>{b.name}</span>
-                      <span style={{ fontSize: 13.5, fontFamily: "'IBM Plex Mono', monospace", display: "inline-flex", alignItems: "center", gap: 3 }}>
-                        <Money amount={b.value} size={12.5} />{b.budget > 0 ? <> / <Money amount={b.budget} size={12.5} /></> : ""}
+                      <span style={{ flex: 1, fontSize: 13 }}>{b.name}</span>
+                      <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                        <Money amount={b.value} size={12} />{b.budget > 0 ? <> / <Money amount={b.budget} size={12} /></> : ""}
                       </span>
                     </div>
                     {b.budget > 0 && (
@@ -1934,57 +2216,16 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
             </div>
           </div>
 
-          {(paymentMethods.length > 0 || (paymentBreakdown.length > 1 || (paymentBreakdown.length === 1 && paymentBreakdown[0].name !== "Not specified"))) && (
-            <div style={styles.card}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 13, opacity: 0.6 }}>By payment method this month</span>
-                <button className="row-icon-hover" style={styles.rowIconBtn} onClick={() => setPaymentSetupOpen(true)} title="Edit payment methods">
-                  <Pencil size={13} />
-                </button>
-              </div>
-
-              <div style={{ height: 160, marginTop: 4 }}>
-                {paymentBreakdown.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={paymentBreakdown} dataKey="value" nameKey="name" innerRadius={38} outerRadius={62} paddingAngle={2}>
-                        {paymentBreakdown.map((entry, i) => <Cell key={i} fill={entry.color} stroke="none" />)}
-                      </Pie>
-                      <Tooltip formatter={(v) => fmtMoneyLocal(v)} contentStyle={{ background: T.ink, border: "none", borderRadius: 8, color: T.parchment, fontSize: 13 }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div style={styles.emptyRingWrap}>
-                    <div style={{ ...styles.emptyRing, width: 100, height: 100 }}>
-                      <span style={{ fontSize: 11, opacity: 0.5, textAlign: "center", padding: "0 10px" }}>No spending yet</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-                {paymentBreakdown.map((b) => (
-                  <div key={b.name} style={styles.legendRow}>
-                    <span style={{ ...styles.legendDot, background: b.color }} />
-                    <span style={{ flex: 1, fontSize: 13.5 }}>{b.name}</span>
-                    <span style={{ fontSize: 13.5, fontFamily: "'IBM Plex Mono', monospace" }}>
-                      <Money amount={b.value} size={12.5} />
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <button style={styles.addBtn} onClick={() => { setEditingExpense(null); setFormOpen(true); }}>
+            <Plus size={18} /> Log an expense
+          </button>
 
           <div style={{ display: "flex", gap: 8 }}>
-            <button style={{ ...styles.addBtn, flex: 1 }} onClick={() => { setEditingExpense(null); setFormOpen(true); }}>
-              <Plus size={18} /> Log an expense
-            </button>
-            <button style={styles.secondaryIconBtn} onClick={() => setIncomeFormOpen(true)} title="Log income">
-              <TrendingUp size={18} />
+            <button style={{ ...styles.addBtnSecondary, flex: 1 }} onClick={() => setIncomeFormOpen(true)}>
+              <TrendingUp size={17} /> Log an income
             </button>
             {!profile.isDemo && (
-              <button style={styles.secondaryIconBtn} onClick={() => setRecurringOpen(true)} title="Recurring expenses">
+              <button style={styles.secondaryIconBtn} onClick={() => setRecurringOpen(true)} title="Recurring expenses & income">
                 <Repeat size={18} />
               </button>
             )}
@@ -1998,6 +2239,78 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
               </button>
             )}
           </div>
+
+          <div style={{ ...styles.card, padding: "14px 18px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 13, opacity: 0.6, display: "flex", alignItems: "center", gap: 6 }}>
+                <PiggyBank size={14} /> Savings this month
+              </span>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15 }}>
+                <Money amount={monthSavingsTotal} size={14} color={T.gold} />
+              </span>
+            </div>
+            <p style={{ fontSize: 11.5, opacity: 0.55, margin: "4px 0 10px" }}>
+              Money set aside counts against your available cash, alongside expenses — it's subtracted from Net above.
+            </p>
+            {monthSavings.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
+                {monthSavings.map((s) => (
+                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+                    <span style={{ flex: 1, opacity: 0.75 }}>{s.date} {s.note ? `· ${s.note}` : ""}</span>
+                    <Money amount={s.amount} size={12} color={T.gold} />
+                    <button className="row-icon-hover" style={{ ...styles.rowIconBtn, width: 22, height: 22 }} onClick={() => handleDeleteSavings(s.id)}>
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button type="button" style={{ ...styles.secondaryBtnSmall, width: "100%", justifyContent: "center" }} onClick={() => setSavingsFormOpen(true)}>
+              <Plus size={14} /> Log savings
+            </button>
+          </div>
+
+          {(paymentMethods.length > 0 || (paymentBreakdown.length > 1 || (paymentBreakdown.length === 1 && paymentBreakdown[0].name !== "Not specified"))) && (
+            <div style={{ ...styles.card, padding: "14px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 12.5, opacity: 0.6 }}>By payment method this month</span>
+                <button className="row-icon-hover" style={styles.rowIconBtn} onClick={() => setPaymentSetupOpen(true)} title="Edit payment methods">
+                  <Pencil size={13} />
+                </button>
+              </div>
+
+              <div style={{ height: 110, marginTop: 4 }}>
+                {paymentBreakdown.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={paymentBreakdown} dataKey="value" nameKey="name" innerRadius={28} outerRadius={46} paddingAngle={2}>
+                        {paymentBreakdown.map((entry, i) => <Cell key={i} fill={entry.color} stroke="none" />)}
+                      </Pie>
+                      <Tooltip formatter={(v) => fmtMoneyLocal(v)} contentStyle={{ background: T.ink, border: "none", borderRadius: 8, color: T.parchment, fontSize: 13 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={styles.emptyRingWrap}>
+                    <div style={{ ...styles.emptyRing, width: 80, height: 80 }}>
+                      <span style={{ fontSize: 10.5, opacity: 0.5, textAlign: "center", padding: "0 8px" }}>No spending yet</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 4 }}>
+                {paymentBreakdown.map((b) => (
+                  <div key={b.name} style={styles.legendRow}>
+                    <span style={{ ...styles.legendDot, background: b.color }} />
+                    <span style={{ flex: 1, fontSize: 13 }}>{b.name}</span>
+                    <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace" }}>
+                      <Money amount={b.value} size={12} />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
 
         <section style={styles.rightCol}>
@@ -2062,11 +2375,16 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                         className="row-icon-hover" style={styles.rowIconBtn}
                         title="View receipt"
                         onClick={async () => {
+                          setReceiptViewerLoading(true);
+                          setReceiptViewerOpen(true);
                           try {
                             const url = await getReceiptUrl(x.receiptPath);
-                            window.open(url, "_blank", "noopener,noreferrer");
+                            setReceiptViewerUrl(url);
                           } catch {
+                            setReceiptViewerOpen(false);
                             setError("Couldn't open that receipt right now.");
+                          } finally {
+                            setReceiptViewerLoading(false);
                           }
                         }}
                       >
@@ -2132,6 +2450,13 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         />
       )}
 
+      {savingsFormOpen && (
+        <SavingsForm
+          onCancel={() => setSavingsFormOpen(false)}
+          onSave={handleAddSavings}
+        />
+      )}
+
       {recurringOpen && (
         <RecurringModal
           categories={categories}
@@ -2139,6 +2464,9 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           templates={recurringTemplates}
           onAdd={handleAddRecurring}
           onDelete={handleDeleteRecurring}
+          incomeTemplates={recurringIncomeTemplates}
+          onAddIncome={handleAddRecurringIncome}
+          onDeleteIncome={handleDeleteRecurringIncome}
           onClose={() => setRecurringOpen(false)}
         />
       )}
@@ -2149,6 +2477,33 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           onImport={handleImportExpenses}
           onClose={() => setCsvImportOpen(false)}
         />
+      )}
+
+      {receiptViewerOpen && (
+        <div style={styles.modalOverlay} onClick={() => { setReceiptViewerOpen(false); setReceiptViewerUrl(""); }}>
+          <div style={{ ...styles.modalCard, maxWidth: 480, padding: 16, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ ...styles.modalHeader, marginBottom: 10 }}>
+              <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 17, margin: 0 }}>Receipt</h2>
+              <button
+                type="button" style={styles.iconGhostBtnDark}
+                onClick={() => { setReceiptViewerOpen(false); setReceiptViewerUrl(""); }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            {receiptViewerLoading ? (
+              <p style={{ fontSize: 13.5, opacity: 0.6, padding: "30px 0" }}>Loading…</p>
+            ) : receiptViewerUrl ? (
+              <img
+                src={receiptViewerUrl}
+                alt="Receipt"
+                style={{ width: "100%", maxHeight: "70vh", objectFit: "contain", borderRadius: 10, display: "block" }}
+              />
+            ) : (
+              <p style={{ fontSize: 13.5, opacity: 0.6, padding: "30px 0" }}>Couldn't load this receipt.</p>
+            )}
+          </div>
+        </div>
       )}
 
       {budgetFormOpen && (
@@ -2178,10 +2533,22 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       )}
 
       {gettingStartedOpen && (
-        <GettingStartedModal onClose={() => {
-          if (!profile.isDemo) localStorage.setItem(`trackit-onboarding-seen-${uid}`, "1");
-          setGettingStartedOpen(false);
-        }} />
+        <GettingStartedModal
+          onClose={() => {
+            if (!profile.isDemo) localStorage.setItem(`trackit-onboarding-seen-${uid}`, "1");
+            setGettingStartedOpen(false);
+          }}
+          onOpenBudget={() => {
+            if (!profile.isDemo) localStorage.setItem(`trackit-onboarding-seen-${uid}`, "1");
+            setGettingStartedOpen(false);
+            setBudgetFormOpen(true);
+          }}
+          onOpenIncome={() => {
+            if (!profile.isDemo) localStorage.setItem(`trackit-onboarding-seen-${uid}`, "1");
+            setGettingStartedOpen(false);
+            setIncomeFormOpen(true);
+          }}
+        />
       )}
 
       {budgetAlert && (
@@ -2526,17 +2893,88 @@ function IncomeForm({ onCancel, onSave }) {
 }
 
 /* ================================================================
+   SAVINGS FORM
+================================================================= */
+function SavingsForm({ onCancel, onSave }) {
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(todayISO());
+  const [note, setNote] = useState("");
+  const [err, setErr] = useState("");
+
+  const submit = (e) => {
+    e?.preventDefault?.();
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) return setErr("Enter an amount greater than zero.");
+    if (!date) return setErr("Pick a date.");
+    onSave({ amount: amt, date, note: note.trim() });
+  };
+
+  return (
+    <div style={styles.modalOverlay} onClick={onCancel}>
+      <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: 0 }}>Log savings</h2>
+          <button type="button" style={styles.iconGhostBtnDark} onClick={onCancel}><X size={18} /></button>
+        </div>
+        <p style={{ fontSize: 12.5, opacity: 0.6, marginTop: 4 }}>
+          Counted against your available cash alongside expenses — this reduces Net, since it's money that's no
+          longer free to spend.
+        </p>
+
+        <label style={styles.label}>Amount</label>
+        <input
+          autoFocus
+          type="number"
+          inputMode="decimal"
+          style={styles.textInput}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.00"
+        />
+
+        <label style={styles.label}>Date</label>
+        <input type="date" style={styles.textInput} value={date} onChange={(e) => setDate(e.target.value)} />
+
+        <label style={styles.label}>Note (optional)</label>
+        <input
+          style={styles.textInput}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit(e)}
+          placeholder="e.g. Emergency fund"
+          maxLength={60}
+        />
+
+        {err && <p style={styles.errorText}>{err}</p>}
+
+        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+          <button type="button" style={styles.textBtn} onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} onClick={submit}>
+            <Check size={16} /> Add to ledger
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
    RECURRING EXPENSES
 ================================================================= */
-function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete, onClose }) {
+function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete, incomeTemplates, onAddIncome, onDeleteIncome, onClose }) {
+  const [tab, setTab] = useState("expense"); // expense | income
   const [creating, setCreating] = useState(false);
   const [category, setCategory] = useState(categories[0]?.name || "");
+  const [source, setSource] = useState(SUGGESTED_INCOME_SOURCES[0]);
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [dayOfMonth, setDayOfMonth] = useState("1");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const isIncome = tab === "income";
+  const activeTemplates = isIncome ? incomeTemplates : templates;
 
   const handleAdd = async (e) => {
     e?.preventDefault?.();
@@ -2547,10 +2985,14 @@ function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete
     if (!day || day < 1 || day > 31) return setError("Day of month must be between 1 and 31.");
     setBusy(true);
     try {
-      await onAdd({ category, amount: amt, note: note.trim(), paymentMethod, dayOfMonth: day });
+      if (isIncome) {
+        await onAddIncome({ source, amount: amt, note: note.trim(), dayOfMonth: day });
+      } else {
+        await onAdd({ category, amount: amt, note: note.trim(), paymentMethod, dayOfMonth: day });
+      }
       setAmount(""); setNote(""); setCreating(false);
     } catch (err) {
-      setError(err?.message || "Couldn't add that recurring expense. Please try again.");
+      setError(err?.message || `Couldn't add that recurring ${isIncome ? "income" : "expense"}. Please try again.`);
     } finally {
       setBusy(false);
     }
@@ -2560,23 +3002,33 @@ function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete
     <div style={styles.modalOverlay} onClick={onClose}>
       <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
         <div style={styles.modalHeader}>
-          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: 0 }}>Recurring expenses</h2>
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: 0 }}>Recurring</h2>
           <button type="button" style={styles.iconGhostBtnDark} onClick={onClose}><X size={18} /></button>
         </div>
-        <p style={{ fontSize: 13, opacity: 0.65, marginTop: 4 }}>
+
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button type="button" style={{ ...styles.chip, borderColor: tab === "expense" ? T.gold : "transparent" }} onClick={() => { setTab("expense"); setCreating(false); setError(""); }}>
+            Expenses
+          </button>
+          <button type="button" style={{ ...styles.chip, borderColor: tab === "income" ? T.gold : "transparent" }} onClick={() => { setTab("income"); setCreating(false); setError(""); }}>
+            Income
+          </button>
+        </div>
+
+        <p style={{ fontSize: 13, opacity: 0.65, marginTop: 10 }}>
           Added automatically once a month, the first time anyone opens this ledger after the month starts.
         </p>
 
-        {templates.length > 0 && (
+        {activeTemplates.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-            {templates.map((t) => (
+            {activeTemplates.map((t) => (
               <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
                 <Repeat size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
                 <span style={{ flex: 1 }}>
-                  {t.category} · <Money amount={t.amount} size={13} /> · Day {t.dayOfMonth}
+                  {isIncome ? t.source : t.category} · <Money amount={t.amount} size={13} /> · Day {t.dayOfMonth}
                   {t.note ? ` · ${t.note}` : ""}
                 </span>
-                <button className="row-icon-hover" style={styles.rowIconBtn} onClick={() => onDelete(t.id)} title="Remove">
+                <button className="row-icon-hover" style={styles.rowIconBtn} onClick={() => (isIncome ? onDeleteIncome(t.id) : onDelete(t.id))} title="Remove">
                   <X size={14} />
                 </button>
               </div>
@@ -2586,14 +3038,25 @@ function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete
 
         {!creating ? (
           <button type="button" className="btn-lift" style={{ ...styles.secondaryBtn, marginTop: 14 }} onClick={() => setCreating(true)}>
-            <Plus size={16} /> New recurring expense
+            <Plus size={16} /> New recurring {isIncome ? "income" : "expense"}
           </button>
         ) : (
           <div style={{ marginTop: 14 }}>
-            <label style={styles.label}>Category</label>
-            <select style={styles.select} value={category} onChange={(e) => setCategory(e.target.value)}>
-              {categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-            </select>
+            {isIncome ? (
+              <>
+                <label style={styles.label}>Source</label>
+                <select style={styles.select} value={source} onChange={(e) => setSource(e.target.value)}>
+                  {SUGGESTED_INCOME_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </>
+            ) : (
+              <>
+                <label style={styles.label}>Category</label>
+                <select style={styles.select} value={category} onChange={(e) => setCategory(e.target.value)}>
+                  {categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+                </select>
+              </>
+            )}
 
             <label style={styles.label}>Amount</label>
             <input
@@ -2615,11 +3078,15 @@ function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete
               onChange={(e) => setDayOfMonth(e.target.value)}
             />
 
-            <label style={styles.label}>Payment method (optional)</label>
-            <select style={styles.select} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
-              <option value="">Skip — don't specify</option>
-              {paymentMethods.map((name) => <option key={name} value={name}>{name}</option>)}
-            </select>
+            {!isIncome && (
+              <>
+                <label style={styles.label}>Payment method (optional)</label>
+                <select style={styles.select} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+                  <option value="">Skip — don't specify</option>
+                  {paymentMethods.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </>
+            )}
 
             <label style={styles.label}>Note (optional)</label>
             <input
@@ -2627,7 +3094,7 @@ function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete
               value={note}
               onChange={(e) => setNote(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAdd(e)}
-              placeholder="e.g. Rent"
+              placeholder={isIncome ? "e.g. Monthly paycheck" : "e.g. Rent"}
               maxLength={60}
             />
 
@@ -3039,12 +3506,12 @@ function PaymentMethodsSetupModal({ existing, onSave, onSkip }) {
 /* ================================================================
    GETTING STARTED (one-time tips after first setup)
 ================================================================= */
-function GettingStartedModal({ onClose }) {
+function GettingStartedModal({ onClose, onOpenBudget, onOpenIncome }) {
   const tips = [
     {
       icon: TrendingUp,
       title: "Log income too, not just expenses",
-      body: "The green trending-up icon next to \"Log an expense\" records money coming in — salary, freelance work, gifts, whatever. The dashboard shows Spent, Income, and Net together once you have both.",
+      body: "The green \"Log an income\" button records money coming in — salary, freelance work, gifts, whatever — and can repeat automatically each month. The dashboard shows Spent, Income, Savings, and Net together once you have some logged.",
     },
     {
       icon: Target,
@@ -3086,8 +3553,20 @@ function GettingStartedModal({ onClose }) {
           })}
         </div>
 
-        <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, marginTop: 22 }} onClick={onClose}>
-          Got it, let's go
+        <p style={{ fontSize: 12, opacity: 0.55, marginTop: 18, marginBottom: 8 }}>
+          Worth doing right now, if you have a minute:
+        </p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" style={{ ...styles.addBtnSecondary, flex: 1, padding: "11px" }} onClick={onOpenIncome}>
+            <TrendingUp size={15} /> Log income
+          </button>
+          <button type="button" style={{ ...styles.secondaryBtn, flex: 1, marginTop: 0 }} onClick={onOpenBudget}>
+            <Target size={15} /> Set budget
+          </button>
+        </div>
+
+        <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, marginTop: 10 }} onClick={onClose}>
+          I'll do this later
         </button>
       </div>
     </div>
@@ -3978,6 +4457,11 @@ const styles = {
     display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
     background: T.gold, color: T.ink, border: "none", borderRadius: 14, padding: "15px",
     fontSize: 15, fontWeight: 700, cursor: "pointer", boxShadow: "0 6px 18px rgba(201,162,39,0.35)",
+  },
+  addBtnSecondary: {
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+    background: T.sage, color: "#fff", border: "none", borderRadius: 14, padding: "13px",
+    fontSize: 14.5, fontWeight: 700, cursor: "pointer", boxShadow: "0 6px 16px rgba(94,140,97,0.3)",
   },
   secondaryIconBtn: {
     display: "flex", alignItems: "center", justifyContent: "center",

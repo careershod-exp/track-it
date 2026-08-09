@@ -442,3 +442,109 @@ export async function updateMemberDisplayName(ledgerId, userId, displayName) {
     .eq("user_id", userId);
   if (error) throw error;
 }
+
+/* ---------------------------------------------------------------
+   Savings
+------------------------------------------------------------------ */
+export async function fetchSavings(ledgerId) {
+  const { data, error } = await supabase
+    .from("savings")
+    .select("id,date,note,amount,created_at,added_by")
+    .eq("ledger_id", ledgerId)
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    id: row.id,
+    amount: Number(row.amount),
+    date: row.date,
+    note: row.note || "",
+    createdAt: new Date(row.created_at).getTime(),
+    addedBy: row.added_by,
+  }));
+}
+
+export async function insertSavingsRemote(ledgerId, addedBy, entry) {
+  const { data, error } = await supabase
+    .from("savings")
+    .insert({
+      ledger_id: ledgerId,
+      added_by: addedBy,
+      date: entry.date,
+      note: entry.note || null,
+      amount: entry.amount,
+    })
+    .select("id,date,note,amount,created_at,added_by")
+    .single();
+  if (error) throw error;
+  return {
+    id: data.id,
+    amount: Number(data.amount),
+    date: data.date,
+    note: data.note || "",
+    createdAt: new Date(data.created_at).getTime(),
+    addedBy: data.added_by,
+  };
+}
+
+export async function deleteSavingsRemote(savingsId) {
+  const { error } = await supabase.from("savings").delete().eq("id", savingsId);
+  if (error) throw error;
+}
+
+/* ---------------------------------------------------------------
+   Recurring income
+------------------------------------------------------------------ */
+export async function fetchRecurringIncome(ledgerId) {
+  const { data, error } = await supabase
+    .from("recurring_income")
+    .select("id,source,note,amount,day_of_month,last_generated_month")
+    .eq("ledger_id", ledgerId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    id: row.id,
+    source: row.source,
+    note: row.note || "",
+    amount: Number(row.amount),
+    dayOfMonth: row.day_of_month,
+    lastGeneratedMonth: row.last_generated_month,
+  }));
+}
+
+export async function createRecurringIncome(ledgerId, createdBy, template) {
+  const { data, error } = await supabase
+    .from("recurring_income")
+    .insert({
+      ledger_id: ledgerId,
+      created_by: createdBy,
+      source: template.source,
+      note: template.note || null,
+      amount: template.amount,
+      day_of_month: template.dayOfMonth,
+    })
+    .select("id,source,note,amount,day_of_month,last_generated_month")
+    .single();
+  if (error) throw error;
+  return {
+    id: data.id,
+    source: data.source,
+    note: data.note || "",
+    amount: Number(data.amount),
+    dayOfMonth: data.day_of_month,
+    lastGeneratedMonth: data.last_generated_month,
+  };
+}
+
+export async function deleteRecurringIncome(recurringId) {
+  const { error } = await supabase.from("recurring_income").delete().eq("id", recurringId);
+  if (error) throw error;
+}
+
+export async function markRecurringIncomeGenerated(recurringId, monthStr) {
+  const { error } = await supabase
+    .from("recurring_income")
+    .update({ last_generated_month: monthStr })
+    .eq("id", recurringId);
+  if (error) throw error;
+}

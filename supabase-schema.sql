@@ -294,3 +294,64 @@ create policy "delete receipts in your ledgers" on storage.objects for delete
       and m.user_id = auth.uid()
     )
   );
+
+-- Savings ---------------------------------------------------------------
+-- Money logged here counts as an outflow alongside expenses when
+-- calculating Net (Income - Spent - Savings) — it's tracked separately
+-- from expenses so it's visible as its own line, not because it's a
+-- different kind of spending.
+create table if not exists savings (
+  id uuid primary key default gen_random_uuid(),
+  ledger_id uuid not null references ledgers(id) on delete cascade,
+  added_by uuid references auth.users(id) on delete set null,
+  date date not null,
+  note text,
+  amount numeric not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists savings_ledger_id_idx on savings (ledger_id);
+create index if not exists savings_ledger_date_idx on savings (ledger_id, date);
+
+alter table savings enable row level security;
+
+create policy "select savings in your ledgers" on savings for select
+  using (exists (select 1 from ledger_members m where m.ledger_id = savings.ledger_id and m.user_id = auth.uid()));
+
+create policy "insert savings in your ledgers" on savings for insert
+  with check (
+    added_by = auth.uid()
+    and exists (select 1 from ledger_members m where m.ledger_id = savings.ledger_id and m.user_id = auth.uid())
+  );
+
+create policy "delete savings in your ledgers" on savings for delete
+  using (exists (select 1 from ledger_members m where m.ledger_id = savings.ledger_id and m.user_id = auth.uid()));
+
+-- Recurring income --------------------------------------------------------
+-- Same lazy "generate on next visit" pattern as recurring_expenses — no
+-- server-side cron here either.
+create table if not exists recurring_income (
+  id uuid primary key default gen_random_uuid(),
+  ledger_id uuid not null references ledgers(id) on delete cascade,
+  created_by uuid references auth.users(id) on delete set null,
+  source text not null,
+  note text,
+  amount numeric not null,
+  day_of_month integer not null default 1,
+  last_generated_month text,
+  created_at timestamptz not null default now()
+);
+create index if not exists recurring_income_ledger_id_idx on recurring_income (ledger_id);
+
+alter table recurring_income enable row level security;
+
+create policy "select recurring income in your ledgers" on recurring_income for select
+  using (exists (select 1 from ledger_members m where m.ledger_id = recurring_income.ledger_id and m.user_id = auth.uid()));
+
+create policy "insert recurring income in your ledgers" on recurring_income for insert
+  with check (
+    created_by = auth.uid()
+    and exists (select 1 from ledger_members m where m.ledger_id = recurring_income.ledger_id and m.user_id = auth.uid())
+  );
+
+create policy "delete recurring income in your ledgers" on recurring_income for delete
+  using (exists (select 1 from ledger_members m where m.ledger_id = recurring_income.ledger_id and m.user_id = auth.uid()));
