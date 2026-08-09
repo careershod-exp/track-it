@@ -1138,6 +1138,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [savings, setSavings] = useState([]);
   const [savingsFormOpen, setSavingsFormOpen] = useState(false);
   const [monthEndPromptOpen, setMonthEndPromptOpen] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null); // { title, message?, confirmLabel?, onConfirm } | null
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null); // "YYYY-MM-DD" or null for the whole month
   const [monthEndNet, setMonthEndNet] = useState(0);
@@ -1210,6 +1211,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
             setCurrency(cached.currency || "AED");
             setMemberNames(cached.memberNames || {});
             setRecurringTemplates(cached.recurringTemplates || []);
+            setRecurringIncomeTemplates(cached.recurringIncomeTemplates || []);
+            setSavings(cached.savings || []);
             setIncome([...pendingIncome, ...(cached.income || [])]);
             setExpenses([...pendingExpenses, ...(cached.expenses || [])]);
           } else {
@@ -1316,8 +1319,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         saveOfflineCache(uid, {
           categories: profileData.categories, budgets: profileData.budgets,
           paymentMethods: profileData.paymentMethods, currency: profileData.currency || "AED",
-          memberNames: names, recurringTemplates: finalRecurring,
-          expenses: finalExpenses, income: finalIncome,
+          memberNames: names, recurringTemplates: finalRecurring, recurringIncomeTemplates: finalRecurringIncome,
+          expenses: finalExpenses, income: finalIncome, savings: savingsRows,
         });
 
         if (queuedItems.length > 0) flushQueue();
@@ -2431,7 +2434,10 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                       {s.date} {s.note ? `· ${s.note}` : Number(s.amount) < 0 ? "· Taken from savings" : ""}
                     </span>
                     <Money amount={s.amount} size={12} color={Number(s.amount) < 0 ? T.brick : T.gold} />
-                    <button className="row-icon-hover" style={{ ...styles.rowIconBtn, width: 22, height: 22 }} onClick={() => handleDeleteSavings(s.id)}>
+                    <button
+                      className="row-icon-hover" style={{ ...styles.rowIconBtn, width: 22, height: 22 }}
+                      onClick={() => setConfirmDialog({ title: "Delete this savings entry?", message: fmtMoneyLocal(Math.abs(s.amount)), onConfirm: () => handleDeleteSavings(s.id) })}
+                    >
                       <X size={12} />
                     </button>
                   </div>
@@ -2631,7 +2637,10 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                     <div style={{ fontSize: 12.5, opacity: 0.6 }}>{x.date} {x.note ? `· ${x.note}` : ""} {x.pendingSync ? "· syncing…" : ""}</div>
                   </div>
                   <div style={styles.rowAmount}><Money amount={Number(x.amount)} size={13.5} color={T.sage} /></div>
-                  <button className="row-icon-hover" style={{ ...styles.rowIconBtn, color: T.brick }} onClick={() => handleDeleteIncome(x.id)}>
+                  <button
+                    className="row-icon-hover" style={{ ...styles.rowIconBtn, color: T.brick }}
+                    onClick={() => setConfirmDialog({ title: "Delete this income entry?", message: `${x.source} · ${fmtMoneyLocal(x.amount)}`, onConfirm: () => handleDeleteIncome(x.id) })}
+                  >
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -2798,6 +2807,16 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           selectedDate={selectedDate}
           onSelectDate={(d) => { setSelectedDate(d); setCalendarOpen(false); }}
           onClose={() => setCalendarOpen(false)}
+        />
+      )}
+
+      {confirmDialog && (
+        <ConfirmModal
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          confirmLabel={confirmDialog.confirmLabel}
+          onConfirm={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }}
+          onCancel={() => setConfirmDialog(null)}
         />
       )}
     </div>
@@ -3244,6 +3263,7 @@ function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete
   const [dayOfMonth, setDayOfMonth] = useState("1");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const isIncome = tab === "income";
   const activeTemplates = isIncome ? incomeTemplates : templates;
@@ -3303,7 +3323,7 @@ function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete
                   </div>
                 </div>
                 <Money amount={t.amount} size={13.5} />
-                <button className="row-icon-hover" style={styles.rowIconBtn} onClick={() => (isIncome ? onDeleteIncome(t.id) : onDelete(t.id))} title="Remove">
+                <button className="row-icon-hover" style={styles.rowIconBtn} onClick={() => setConfirmDeleteId(t.id)} title="Remove">
                   <X size={14} />
                 </button>
               </div>
@@ -3383,6 +3403,15 @@ function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete
           </div>
         )}
       </div>
+
+      {confirmDeleteId && (
+        <ConfirmModal
+          title={`Remove this recurring ${isIncome ? "income" : "expense"}?`}
+          message="It won't be deleted retroactively — only future months stop generating it."
+          onConfirm={() => { (isIncome ? onDeleteIncome : onDelete)(confirmDeleteId); setConfirmDeleteId(null); }}
+          onCancel={() => setConfirmDeleteId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -3861,6 +3890,7 @@ function TwoFactorSection() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmTurnOff, setConfirmTurnOff] = useState(false);
 
   const loadFactors = async () => {
     try {
@@ -3973,7 +4003,7 @@ function TwoFactorSection() {
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
             <ShieldCheck size={14} style={{ color: T.sage }} />
             <span style={{ flex: 1 }}>Enabled</span>
-            <button type="button" style={styles.secondaryBtnSmall} disabled={busy} onClick={() => removeFactor(factors[0].id)}>
+            <button type="button" style={styles.secondaryBtnSmall} disabled={busy} onClick={() => setConfirmTurnOff(true)}>
               Turn off
             </button>
           </div>
@@ -3987,6 +4017,16 @@ function TwoFactorSection() {
             <ShieldCheck size={16} /> Turn on two-factor authentication
           </button>
         </div>
+      )}
+
+      {confirmTurnOff && (
+        <ConfirmModal
+          title="Turn off two-factor authentication?"
+          message="Signing in will only need your password after this."
+          confirmLabel="Turn off"
+          onConfirm={() => { setConfirmTurnOff(false); removeFactor(factors[0].id); }}
+          onCancel={() => setConfirmTurnOff(false)}
+        />
       )}
     </div>
   );
@@ -4341,6 +4381,7 @@ function MembersModal({ ledgerId, currentUserId, ledgerName, inviterName, onClos
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmCancelInvite, setConfirmCancelInvite] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -4451,7 +4492,7 @@ function MembersModal({ ledgerId, currentUserId, ledgerName, inviterName, onClos
               {invites.map((inv) => (
                 <div key={inv.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
                   <span style={{ flex: 1, opacity: 0.75 }}>{inv.email}</span>
-                  <button type="button" className="row-icon-hover" style={styles.rowIconBtn} onClick={() => handleCancelInvite(inv.id)} title="Cancel invite">
+                  <button type="button" className="row-icon-hover" style={styles.rowIconBtn} onClick={() => setConfirmCancelInvite(inv)} title="Cancel invite">
                     <X size={14} />
                   </button>
                 </div>
@@ -4460,6 +4501,16 @@ function MembersModal({ ledgerId, currentUserId, ledgerName, inviterName, onClos
           </>
         )}
       </div>
+
+      {confirmCancelInvite && (
+        <ConfirmModal
+          title="Cancel this invite?"
+          message={confirmCancelInvite.email}
+          confirmLabel="Cancel invite"
+          onConfirm={() => { handleCancelInvite(confirmCancelInvite.id); setConfirmCancelInvite(null); }}
+          onCancel={() => setConfirmCancelInvite(null)}
+        />
+      )}
     </div>
   );
 }
@@ -4494,6 +4545,26 @@ function BudgetAlertModal({ alert, onClose }) {
 /* ================================================================
    MONTH-END PROMPT (shown on the last day of the month, once)
 ================================================================= */
+/* ================================================================
+   CONFIRM DIALOG (reused for every delete action)
+================================================================= */
+function ConfirmModal({ title, message, confirmLabel = "Delete", onConfirm, onCancel }) {
+  return (
+    <div style={styles.modalOverlay} onClick={onCancel}>
+      <div style={{ ...styles.modalCard, maxWidth: 340, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 18, margin: "0 0 8px" }}>{title}</h2>
+        {message && <p style={{ fontSize: 13.5, opacity: 0.75, margin: "0 0 18px", lineHeight: 1.4 }}>{message}</p>}
+        <div style={{ display: "flex", gap: 10, marginTop: message ? 0 : 18 }}>
+          <button type="button" style={{ ...styles.textBtn, flex: 1, textAlign: "center" }} onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, background: T.brick }} onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MonthEndModal({ amount, monthName, onMoveToSavings, onCarryForward, onDismiss }) {
   return (
     <div style={styles.modalOverlay} onClick={onDismiss}>
