@@ -1877,6 +1877,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [showAllCategories, setShowAllCategories] = useState(false);
   const [showAllExpenses, setShowAllExpenses] = useState(false);
   const [showAllIncome, setShowAllIncome] = useState(false);
+  const [showAllPaymentMethods, setShowAllPaymentMethods] = useState(false);
   useEffect(() => { setShowAllExpenses(false); setShowAllIncome(false); }, [monthCursor, selectedDate, activeFilters, searchQuery]);
 
   const paymentBreakdown = useMemo(() => {
@@ -2466,7 +2467,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 4 }}>
-                {paymentBreakdown.map((b) => (
+                {(showAllPaymentMethods ? paymentBreakdown : paymentBreakdown.slice(0, 6)).map((b) => (
                   <div key={b.name} style={styles.legendRow}>
                     <span style={{ ...styles.legendDot, background: b.color }} />
                     <span style={{ flex: 1, fontSize: 13 }}>{b.name}</span>
@@ -2475,6 +2476,15 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                     </span>
                   </div>
                 ))}
+                {paymentBreakdown.length > 6 && (
+                  <button
+                    type="button"
+                    style={{ ...styles.textBtn, marginTop: 0, textAlign: "left", fontSize: 12.5 }}
+                    onClick={() => setShowAllPaymentMethods((v) => !v)}
+                  >
+                    {showAllPaymentMethods ? "Show less" : `+${paymentBreakdown.length - 6} more`}
+                  </button>
+                )}
               </div>
             </div>
           )}
