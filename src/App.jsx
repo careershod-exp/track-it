@@ -8,7 +8,7 @@ import {
   MoreHorizontal, Plus, Trash2, Pencil, LogOut, X, Check,
   ChevronLeft, ChevronRight, Receipt, Target, AlertTriangle, Send, Download, Users, Mail, FileSpreadsheet,
   Banknote, CreditCard, Landmark, Wallet, ChevronDown, BookMarked, Settings, KeyRound,
-  TrendingUp, Repeat, Search, RotateCcw, BarChart3, History, ShieldCheck, Camera, WifiOff, ImageOff, Upload, PiggyBank,
+  TrendingUp, Repeat, Search, RotateCcw, BarChart3, History, ShieldCheck, Camera, WifiOff, ImageOff, Upload, PiggyBank, CalendarDays,
 } from "lucide-react";
 import Papa from "papaparse";
 import { supabase } from "./supabaseClient";
@@ -1137,6 +1137,10 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [incomeFormOpen, setIncomeFormOpen] = useState(false);
   const [savings, setSavings] = useState([]);
   const [savingsFormOpen, setSavingsFormOpen] = useState(false);
+  const [monthEndPromptOpen, setMonthEndPromptOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(null); // "YYYY-MM-DD" or null for the whole month
+  const [monthEndNet, setMonthEndNet] = useState(0);
   const [recurringOpen, setRecurringOpen] = useState(false);
   const [recurringTemplates, setRecurringTemplates] = useState([]);
   const [recurringIncomeTemplates, setRecurringIncomeTemplates] = useState([]);
@@ -1336,6 +1340,31 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       }
     })();
   }, [uid, profile.isDemo]);
+
+  // Checked once data has loaded — not tied to whichever month the person
+  // happens to be viewing in the picker, always the real current month,
+  // since that's the one actually ending today.
+  useEffect(() => {
+    if (profile.isDemo || expenses === null) return;
+    const now = new Date();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    if (now.getDate() !== daysInMonth) return;
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    if (localStorage.getItem(`trackit-month-end-${uid}-${monthKey}`)) return;
+
+    const inThisMonth = (dateStr) => {
+      const d = new Date(dateStr + "T00:00:00");
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    };
+    const spent = expenses.filter((x) => inThisMonth(x.date)).reduce((s, x) => s + Number(x.amount), 0);
+    const earned = income.filter((x) => inThisMonth(x.date)).reduce((s, x) => s + Number(x.amount), 0);
+    const saved = savings.filter((x) => inThisMonth(x.date)).reduce((s, x) => s + Number(x.amount), 0);
+    const net = earned - spent - saved;
+    if (net > 0) {
+      setMonthEndNet(net);
+      setMonthEndPromptOpen(true);
+    }
+  }, [expenses, income, savings, profile.isDemo, uid]);
 
   const persistCategories = useCallback(async (list) => {
     if (!profile.isDemo && !isOnline) { setError("Changing categories needs an internet connection."); return; }
@@ -1614,13 +1643,14 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   };
 
   const handleAddIncome = async (payload) => {
+    const { repeatMonthly, dayOfMonth, ...entryFields } = payload;
     const localId = `${isOnline ? "tmp" : "offline"}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const entry = { id: localId, createdAt: Date.now(), ...payload, ...(isOnline ? {} : { pendingSync: true }) };
+    const entry = { id: localId, createdAt: Date.now(), ...entryFields, ...(isOnline ? {} : { pendingSync: true }) };
     setIncome((cur) => [entry, ...cur]);
     if (profile.isDemo) { finishIncomeForm(); return; }
     if (!isOnline) {
       const queue = loadOfflineQueue(uid);
-      queue.push({ localId, type: "income", payload, createdAt: Date.now() });
+      queue.push({ localId, type: "income", payload: entryFields, createdAt: Date.now() });
       saveOfflineQueue(uid, queue);
       setPendingSyncCount(queue.length);
       finishIncomeForm();
@@ -1630,6 +1660,18 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       const saved = await withTimeout(insertIncomeRemote(uid, currentUserId, entry), 8000);
       setIncome((cur) => cur.map((x) => (x.id === localId ? saved : x)));
       logActivity(uid, currentUserId, myDisplayName, `logged income "${payload.source}" (${fmtMoneyLocal(payload.amount)})`).catch(() => {});
+      // One recurring template per source is enough — skip creating another
+      // if checking the box again just re-confirms an existing one.
+      if (repeatMonthly && !recurringIncomeTemplates.some((t) => t.source === payload.source)) {
+        try {
+          const template = await createRecurringIncome(uid, currentUserId, {
+            source: payload.source, note: payload.note, amount: payload.amount, dayOfMonth,
+          });
+          setRecurringIncomeTemplates((cur) => [...cur, template]);
+        } catch {
+          // Non-critical — the one-off entry above already succeeded either way.
+        }
+      }
     } catch {
       setError("Saved locally, but syncing failed.");
     }
@@ -1667,7 +1709,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     try {
       const saved = await withTimeout(insertSavingsRemote(uid, currentUserId, entry), 8000);
       setSavings((cur) => cur.map((x) => (x.id === tempId ? saved : x)));
-      logActivity(uid, currentUserId, myDisplayName, `logged savings (${fmtMoneyLocal(payload.amount)})`).catch(() => {});
+      const verb = Number(payload.amount) < 0 ? "took" : "added";
+      logActivity(uid, currentUserId, myDisplayName, `${verb} ${fmtMoneyLocal(Math.abs(payload.amount))} ${Number(payload.amount) < 0 ? "from" : "to"} savings`).catch(() => {});
     } catch {
       setError("Saved locally, but syncing failed.");
     }
@@ -1682,6 +1725,45 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       await withTimeout(deleteSavingsRemote(id), 8000);
     } catch {
       setError("Removed locally, but syncing the delete failed.");
+    }
+  };
+
+  const markMonthEndDecided = () => {
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    if (!profile.isDemo) localStorage.setItem(`trackit-month-end-${uid}-${monthKey}`, "1");
+  };
+
+  const handleMoveNetToSavings = async () => {
+    setMonthEndPromptOpen(false);
+    if (profile.isDemo) { markMonthEndDecided(); return; }
+    if (!isOnline) { setError("This needs an internet connection — reopen the app once you're back online to decide."); return; }
+    try {
+      const saved = await withTimeout(insertSavingsRemote(uid, currentUserId, { date: todayISO(), note: "End of month carry-over", amount: monthEndNet }), 8000);
+      setSavings((cur) => [saved, ...cur]);
+      logActivity(uid, currentUserId, myDisplayName, `moved ${fmtMoneyLocal(monthEndNet)} to savings at month end`).catch(() => {});
+      markMonthEndDecided();
+    } catch {
+      setError("Couldn't move that to savings. Please try again.");
+    }
+  };
+
+  const handleCarryForwardNet = async () => {
+    setMonthEndPromptOpen(false);
+    if (profile.isDemo) { markMonthEndDecided(); return; }
+    if (!isOnline) { setError("This needs an internet connection — reopen the app once you're back online to decide."); return; }
+    const now = new Date();
+    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const dateStr = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
+    try {
+      const saved = await withTimeout(insertIncomeRemote(uid, currentUserId, {
+        date: dateStr, source: "Carried over", note: `From ${MONTHS[now.getMonth()]}`, amount: monthEndNet,
+      }), 8000);
+      setIncome((cur) => [saved, ...cur]);
+      logActivity(uid, currentUserId, myDisplayName, `carried ${fmtMoneyLocal(monthEndNet)} forward to next month`).catch(() => {});
+      markMonthEndDecided();
+    } catch {
+      setError("Couldn't carry that forward. Please try again.");
     }
   };
 
@@ -1823,9 +1905,15 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 
   const monthSavingsTotal = useMemo(() => monthSavings.reduce((s, x) => s + Number(x.amount), 0), [monthSavings]);
 
+  // The running savings balance to date — entries can be negative (a "Take
+  // from savings" withdrawal reduces this), so this is a simple running
+  // sum of everything ever logged, not scoped to any one month.
+  const savingsCumulativeTotal = useMemo(() => savings.reduce((s, x) => s + Number(x.amount), 0), [savings]);
+
   // Money moved to savings counts against available cash the same way an
   // expense does — it's tracked in its own area so it's visible separately,
-  // but it still reduces what's actually left over this month.
+  // but it still reduces what's actually left over this month. A withdrawal
+  // (negative amount) works in reverse, correctly adding back to Net.
   const monthNet = monthIncomeTotal - monthTotal - monthSavingsTotal;
 
   const trendData = useMemo(() => {
@@ -1847,8 +1935,26 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     return months;
   }, [expenses, income]);
 
+  // Which days in the currently viewed month have expense/income activity —
+  // used to draw dots on the calendar grid. Independent of any date filter
+  // currently applied, since the calendar should always show the full
+  // month's picture.
+  const dayActivity = useMemo(() => {
+    const map = {};
+    monthExpenses.forEach((x) => {
+      map[x.date] = map[x.date] || { expense: false, income: false };
+      map[x.date].expense = true;
+    });
+    monthIncome.forEach((x) => {
+      map[x.date] = map[x.date] || { expense: false, income: false };
+      map[x.date].income = true;
+    });
+    return map;
+  }, [monthExpenses, monthIncome]);
+
   const visibleList = useMemo(() => {
     let list = activeFilters.size === 0 ? monthExpenses : monthExpenses.filter((x) => activeFilters.has(x.category));
+    if (selectedDate) list = list.filter((x) => x.date === selectedDate);
     const q = searchQuery.trim().toLowerCase();
     if (q) {
       list = list.filter((x) =>
@@ -1858,7 +1964,11 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       );
     }
     return [...list].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.createdAt - a.createdAt));
-  }, [monthExpenses, activeFilters, searchQuery]);
+  }, [monthExpenses, activeFilters, searchQuery, selectedDate]);
+
+  const visibleIncome = useMemo(() => {
+    return selectedDate ? monthIncome.filter((x) => x.date === selectedDate) : monthIncome;
+  }, [monthIncome, selectedDate]);
 
   const recentTape = useMemo(() => {
     return [...(expenses || [])].sort((a, b) => b.createdAt - a.createdAt).slice(0, 12);
@@ -2124,14 +2234,34 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         <section style={styles.leftCol}>
           <div style={{ ...styles.card, padding: "16px 18px" }}>
             <div style={{ ...styles.monthNav, marginBottom: 6 }}>
-              <button style={styles.iconGhostBtnDark} onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))}>
+              <button style={styles.iconGhostBtnDark} onClick={() => { setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); setSelectedDate(null); }}>
                 <ChevronLeft size={18} />
               </button>
-              <span style={styles.monthLabel}>{MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear()}</span>
-              <button style={styles.iconGhostBtnDark} onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))}>
+              <button
+                type="button"
+                onClick={() => setCalendarOpen(true)}
+                style={{ ...styles.monthLabel, background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                title="View calendar"
+              >
+                {MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear()}
+                <CalendarDays size={15} style={{ opacity: 0.5 }} />
+              </button>
+              <button style={styles.iconGhostBtnDark} onClick={() => { setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); setSelectedDate(null); }}>
                 <ChevronRight size={18} />
               </button>
             </div>
+            {selectedDate && (
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate(null)}
+                  style={{ ...styles.chip, display: "flex", alignItems: "center", gap: 6, borderColor: T.gold }}
+                >
+                  {new Date(selectedDate + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                  <X size={12} />
+                </button>
+              </div>
+            )}
             <div style={{ ...styles.totalRow, marginBottom: 4 }}>
               <span style={{ fontSize: 12.5, opacity: 0.6 }}>Spent this month</span>
               <span style={{ ...styles.totalNumber, fontSize: 28 }}><Money amount={monthTotal} size={22} /></span>
@@ -2164,14 +2294,14 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                   <Target size={13} /> No budget set yet — tap to set one
                 </button>
               )}
-              {(monthIncomeTotal > 0 || income.length > 0 || monthSavingsTotal > 0 || savings.length > 0) && (
+              {(monthIncomeTotal > 0 || income.length > 0 || savingsCumulativeTotal !== 0 || savings.length > 0) && (
                 <div style={{ ...styles.incomeSummaryRow, flexWrap: "wrap", justifyContent: "center", gap: 14 }}>
                   <span style={styles.incomeSummaryItem}>
                     <span style={{ opacity: 0.6 }}>Income</span> <Money amount={monthIncomeTotal} size={12.5} color={T.sage} />
                   </span>
-                  {(monthSavingsTotal > 0 || savings.length > 0) && (
+                  {savings.length > 0 && (
                     <span style={styles.incomeSummaryItem}>
-                      <span style={{ opacity: 0.6 }}>Savings</span> <Money amount={monthSavingsTotal} size={12.5} color={T.gold} />
+                      <span style={{ opacity: 0.6 }}>Total savings</span> <Money amount={savingsCumulativeTotal} size={12.5} color={T.gold} />
                     </span>
                   )}
                   <span style={styles.incomeSummaryItem}>
@@ -2269,21 +2399,24 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           <div style={{ ...styles.card, padding: "14px 18px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={{ fontSize: 13, opacity: 0.6, display: "flex", alignItems: "center", gap: 6 }}>
-                <PiggyBank size={14} /> Savings this month
+                <PiggyBank size={14} /> Total savings
               </span>
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15 }}>
-                <Money amount={monthSavingsTotal} size={14} color={T.gold} />
+                <Money amount={savingsCumulativeTotal} size={14} color={T.gold} />
               </span>
             </div>
             <p style={{ fontSize: 11.5, opacity: 0.55, margin: "4px 0 10px" }}>
-              Money set aside counts against your available cash, alongside expenses — it's subtracted from Net above.
+              Your running balance to date. Money added here counts against your available cash for that month,
+              alongside expenses — it's subtracted from Net. Taking money back out adds it back to Net.
             </p>
-            {monthSavings.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
-                {monthSavings.map((s) => (
+            {savings.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10, maxHeight: 160, overflowY: "auto" }}>
+                {savings.slice(0, 20).map((s) => (
                   <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
-                    <span style={{ flex: 1, opacity: 0.75 }}>{s.date} {s.note ? `· ${s.note}` : ""}</span>
-                    <Money amount={s.amount} size={12} color={T.gold} />
+                    <span style={{ flex: 1, opacity: 0.75 }}>
+                      {s.date} {s.note ? `· ${s.note}` : Number(s.amount) < 0 ? "· Taken from savings" : ""}
+                    </span>
+                    <Money amount={s.amount} size={12} color={Number(s.amount) < 0 ? T.brick : T.gold} />
                     <button className="row-icon-hover" style={{ ...styles.rowIconBtn, width: 22, height: 22 }} onClick={() => handleDeleteSavings(s.id)}>
                       <X size={12} />
                     </button>
@@ -2291,9 +2424,14 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                 ))}
               </div>
             )}
-            <button type="button" style={{ ...styles.secondaryBtnSmall, width: "100%", justifyContent: "center" }} onClick={() => setSavingsFormOpen(true)}>
-              <Plus size={14} /> Log savings
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" style={{ ...styles.secondaryBtnSmall, flex: 1, justifyContent: "center" }} onClick={() => setSavingsFormOpen("add")}>
+                <Plus size={14} /> Log savings
+              </button>
+              <button type="button" style={{ ...styles.secondaryBtnSmall, flex: 1, justifyContent: "center" }} onClick={() => setSavingsFormOpen("withdraw")}>
+                <RotateCcw size={14} /> Take from savings
+              </button>
+            </div>
           </div>
 
           {(paymentMethods.length > 0 || (paymentBreakdown.length > 1 || (paymentBreakdown.length === 1 && paymentBreakdown[0].name !== "Not specified"))) && (
@@ -2429,7 +2567,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
             )}
           </div>
 
-          {monthIncome.length > 0 && (
+          {visibleIncome.length > 0 && (
             <div style={{ ...styles.listCard, marginTop: 16 }}>
               <div style={{
                 display: "flex", alignItems: "center", gap: 6,
@@ -2437,9 +2575,9 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                 textTransform: "uppercase", letterSpacing: 0.4, opacity: 0.55,
                 borderBottom: `1px solid ${T.parchmentDim}`,
               }}>
-                <TrendingUp size={13} /> Income this month
+                <TrendingUp size={13} /> {selectedDate ? "Income that day" : "Income this month"}
               </div>
-              {monthIncome.map((x) => (
+              {visibleIncome.map((x) => (
                 <div key={x.id} className="row-hover" style={styles.expenseRow}>
                   <span style={{ ...styles.rowDot, background: T.sage }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -2478,6 +2616,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 
       {savingsFormOpen && (
         <SavingsForm
+          mode={savingsFormOpen}
+          currentBalance={savingsCumulativeTotal}
           onCancel={() => setSavingsFormOpen(false)}
           onSave={handleAddSavings}
         />
@@ -2580,6 +2720,26 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 
       {budgetAlert && (
         <BudgetAlertModal alert={budgetAlert} onClose={() => setBudgetAlert(null)} />
+      )}
+
+      {monthEndPromptOpen && (
+        <MonthEndModal
+          amount={monthEndNet}
+          monthName={MONTHS[new Date().getMonth()]}
+          onMoveToSavings={handleMoveNetToSavings}
+          onCarryForward={handleCarryForwardNet}
+          onDismiss={() => setMonthEndPromptOpen(false)}
+        />
+      )}
+
+      {calendarOpen && (
+        <CalendarModal
+          month={monthCursor}
+          activity={dayActivity}
+          selectedDate={selectedDate}
+          onSelectDate={(d) => { setSelectedDate(d); setCalendarOpen(false); }}
+          onClose={() => setCalendarOpen(false)}
+        />
       )}
     </div>
     </CurrencyContext.Provider>
@@ -2840,7 +3000,17 @@ function IncomeForm({ onCancel, onSave }) {
   const [customSource, setCustomSource] = useState("");
   const [date, setDate] = useState(todayISO());
   const [note, setNote] = useState("");
+  const [repeatMonthly, setRepeatMonthly] = useState(SUGGESTED_INCOME_SOURCES[0] === "Salary");
   const [err, setErr] = useState("");
+
+  // Salary is the one source that's overwhelmingly recurring in practice —
+  // defaulting to "repeat monthly" for it (and only it) means most people
+  // never have to think about this, while still being able to uncheck it
+  // for a one-off case. Switching away from Salary resets the default so
+  // it doesn't stick around unexpectedly for a source that isn't recurring.
+  useEffect(() => {
+    if (!addingCustom) setRepeatMonthly(source === "Salary");
+  }, [source, addingCustom]);
 
   const submit = (e) => {
     e?.preventDefault?.();
@@ -2849,7 +3019,8 @@ function IncomeForm({ onCancel, onSave }) {
     if (!date) return setErr("Pick a date.");
     const finalSource = addingCustom ? customSource.trim() : source;
     if (!finalSource) return setErr("Name the income source.");
-    onSave({ amount: amt, source: finalSource, date, note: note.trim() });
+    const dayOfMonth = new Date(date + "T00:00:00").getDate();
+    onSave({ amount: amt, source: finalSource, date, note: note.trim(), repeatMonthly, dayOfMonth });
   };
 
   return (
@@ -2906,6 +3077,16 @@ function IncomeForm({ onCancel, onSave }) {
           maxLength={60}
         />
 
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={repeatMonthly}
+            onChange={(e) => setRepeatMonthly(e.target.checked)}
+            style={{ width: 16, height: 16, flexShrink: 0 }}
+          />
+          <span style={{ fontSize: 13 }}>Repeat this every month</span>
+        </label>
+
         {err && <p style={styles.errorText}>{err}</p>}
 
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
@@ -2922,7 +3103,8 @@ function IncomeForm({ onCancel, onSave }) {
 /* ================================================================
    SAVINGS FORM
 ================================================================= */
-function SavingsForm({ onCancel, onSave }) {
+function SavingsForm({ mode, currentBalance, onCancel, onSave }) {
+  const isWithdraw = mode === "withdraw";
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(todayISO());
   const [note, setNote] = useState("");
@@ -2933,19 +3115,23 @@ function SavingsForm({ onCancel, onSave }) {
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) return setErr("Enter an amount greater than zero.");
     if (!date) return setErr("Pick a date.");
-    onSave({ amount: amt, date, note: note.trim() });
+    if (isWithdraw && amt > currentBalance) {
+      return setErr(`You've only got ${fmtNumber(currentBalance)} saved — enter an amount up to that.`);
+    }
+    onSave({ amount: isWithdraw ? -amt : amt, date, note: note.trim() });
   };
 
   return (
     <div style={styles.modalOverlay} onClick={onCancel}>
       <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
         <div style={styles.modalHeader}>
-          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: 0 }}>Log savings</h2>
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: 0 }}>{isWithdraw ? "Take from savings" : "Log savings"}</h2>
           <button type="button" style={styles.iconGhostBtnDark} onClick={onCancel}><X size={18} /></button>
         </div>
         <p style={{ fontSize: 12.5, opacity: 0.6, marginTop: 4 }}>
-          Counted against your available cash alongside expenses — this reduces Net, since it's money that's no
-          longer free to spend.
+          {isWithdraw
+            ? "This reduces your savings balance and adds the amount back to this month's Net, as available cash."
+            : "Counted against your available cash alongside expenses — this reduces Net, since it's money that's no longer free to spend."}
         </p>
 
         <label style={styles.label}>Amount</label>
@@ -2968,7 +3154,7 @@ function SavingsForm({ onCancel, onSave }) {
           value={note}
           onChange={(e) => setNote(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit(e)}
-          placeholder="e.g. Emergency fund"
+          placeholder={isWithdraw ? "e.g. Car repair" : "e.g. Emergency fund"}
           maxLength={60}
         />
 
@@ -2977,7 +3163,7 @@ function SavingsForm({ onCancel, onSave }) {
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
           <button type="button" style={styles.textBtn} onClick={onCancel}>Cancel</button>
           <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} onClick={submit}>
-            <Check size={16} /> Add to ledger
+            <Check size={16} /> {isWithdraw ? "Take out" : "Add to ledger"}
           </button>
         </div>
       </div>
@@ -4241,6 +4427,112 @@ function BudgetAlertModal({ alert, onClose }) {
           ))}
         </div>
         <button type="button" style={styles.primaryBtn} onClick={onClose}>Got it</button>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   MONTH-END PROMPT (shown on the last day of the month, once)
+================================================================= */
+function MonthEndModal({ amount, monthName, onMoveToSavings, onCarryForward, onDismiss }) {
+  return (
+    <div style={styles.modalOverlay} onClick={onDismiss}>
+      <div style={{ ...styles.modalCard, maxWidth: 380, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{
+          width: 48, height: 48, borderRadius: "50%", background: `${T.gold}22`, color: T.gold,
+          display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px",
+        }}>
+          <PiggyBank size={22} />
+        </div>
+        <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 19, margin: "0 0 8px" }}>
+          {monthName} is wrapping up
+        </h2>
+        <p style={{ fontSize: 14, margin: "0 0 18px", opacity: 0.8 }}>
+          You've got <Money amount={amount} size={14} /> left over this month. What would you like to do with it?
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <button type="button" className="btn-lift" style={styles.primaryBtn} onClick={onMoveToSavings}>
+            <PiggyBank size={16} /> Move it to savings
+          </button>
+          <button type="button" className="btn-lift" style={{ ...styles.secondaryBtn, marginTop: 0 }} onClick={onCarryForward}>
+            <TrendingUp size={16} /> Carry it forward to next month
+          </button>
+        </div>
+        <button type="button" style={{ ...styles.textBtn, marginTop: 14, width: "100%", textAlign: "center" }} onClick={onDismiss}>
+          Decide later
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   CALENDAR (tap a day to see that day's expenses/income)
+================================================================= */
+function CalendarModal({ month, activity, selectedDate, onSelectDate, onClose }) {
+  const year = month.getFullYear();
+  const monthIdx = month.getMonth();
+  const firstWeekday = new Date(year, monthIdx, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
+  const todayStr = todayISO();
+
+  const cells = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const dateStrFor = (d) => `${year}-${String(monthIdx + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={{ ...styles.modalCard, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 19, margin: 0 }}>{MONTHS[monthIdx]} {year}</h2>
+          <button type="button" style={styles.iconGhostBtnDark} onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginTop: 12 }}>
+          {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+            <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, opacity: 0.5, padding: "4px 0" }}>{d}</div>
+          ))}
+          {cells.map((d, i) => {
+            if (d === null) return <div key={`b${i}`} />;
+            const dateStr = dateStrFor(d);
+            const act = activity[dateStr];
+            const isToday = dateStr === todayStr;
+            const isSelected = dateStr === selectedDate;
+            return (
+              <button
+                key={dateStr}
+                type="button"
+                onClick={() => onSelectDate(dateStr)}
+                style={{
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  aspectRatio: "1", borderRadius: 10, border: isToday ? `1.5px solid ${T.gold}` : "1.5px solid transparent",
+                  background: isSelected ? T.gold : "transparent", color: isSelected ? T.ink : T.ink,
+                  cursor: "pointer", padding: 2, position: "relative",
+                }}
+              >
+                <span style={{ fontSize: 13, fontWeight: isToday || isSelected ? 700 : 500 }}>{d}</span>
+                {act && (
+                  <span style={{ display: "flex", gap: 2, marginTop: 2 }}>
+                    {act.expense && <span style={{ width: 4, height: 4, borderRadius: "50%", background: isSelected ? T.ink : T.brick }} />}
+                    {act.income && <span style={{ width: 4, height: 4, borderRadius: "50%", background: isSelected ? T.ink : T.sage }} />}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 14, fontSize: 11.5, opacity: 0.6 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.brick, display: "inline-block" }} /> Expense
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.sage, display: "inline-block" }} /> Income
+          </span>
+        </div>
       </div>
     </div>
   );
