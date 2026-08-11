@@ -2382,7 +2382,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                 style={{ ...styles.monthLabel, minWidth: 0, width: "100%", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
                 title="View calendar"
               >
-                {MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear()}
+                <CalendarDays size={15} style={{ opacity: 0, flexShrink: 0 }} aria-hidden="true" />
+                <span>{MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear()}</span>
                 <CalendarDays size={15} style={{ opacity: 0.5, flexShrink: 0 }} />
               </button>
               <button style={styles.iconGhostBtnDark} onClick={() => { setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); setSelectedDate(null); }}>
