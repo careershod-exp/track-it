@@ -548,3 +548,109 @@ export async function markRecurringIncomeGenerated(recurringId, monthStr) {
     .eq("id", recurringId);
   if (error) throw error;
 }
+
+/* ---------------------------------------------------------------
+   Card payment reminders
+------------------------------------------------------------------ */
+export async function fetchCardReminders(ledgerId) {
+  const { data, error } = await supabase
+    .from("card_reminders")
+    .select("id,card_name,due_day,note,last_notified_month")
+    .eq("ledger_id", ledgerId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    id: row.id,
+    cardName: row.card_name,
+    dueDay: row.due_day,
+    note: row.note || "",
+    lastNotifiedMonth: row.last_notified_month,
+  }));
+}
+
+export async function createCardReminder(ledgerId, createdBy, reminder) {
+  const { data, error } = await supabase
+    .from("card_reminders")
+    .insert({
+      ledger_id: ledgerId,
+      created_by: createdBy,
+      card_name: reminder.cardName,
+      due_day: reminder.dueDay,
+      note: reminder.note || null,
+    })
+    .select("id,card_name,due_day,note,last_notified_month")
+    .single();
+  if (error) throw error;
+  return {
+    id: data.id,
+    cardName: data.card_name,
+    dueDay: data.due_day,
+    note: data.note || "",
+    lastNotifiedMonth: data.last_notified_month,
+  };
+}
+
+export async function deleteCardReminder(reminderId) {
+  const { error } = await supabase.from("card_reminders").delete().eq("id", reminderId);
+  if (error) throw error;
+}
+
+export async function markCardReminderNotified(reminderId, monthStr) {
+  const { error } = await supabase
+    .from("card_reminders")
+    .update({ last_notified_month: monthStr })
+    .eq("id", reminderId);
+  if (error) throw error;
+}
+
+/* ---------------------------------------------------------------
+   Notifications (bell icon) — shared per ledger, capped at 15
+------------------------------------------------------------------ */
+export async function fetchNotifications(ledgerId) {
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("id,message,type,read,created_at")
+    .eq("ledger_id", ledgerId)
+    .order("created_at", { ascending: false })
+    .limit(15);
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    id: row.id,
+    message: row.message,
+    type: row.type,
+    read: row.read,
+    createdAt: new Date(row.created_at).getTime(),
+  }));
+}
+
+export async function insertNotification(ledgerId, message, type = "card_due") {
+  const { data, error } = await supabase
+    .from("notifications")
+    .insert({ ledger_id: ledgerId, message, type })
+    .select("id,message,type,read,created_at")
+    .single();
+  if (error) throw error;
+  // Enforce the 15-item cap — delete anything past the 15 most recent for
+  // this ledger, so the list never grows without bound.
+  const { data: overflow } = await supabase
+    .from("notifications")
+    .select("id")
+    .eq("ledger_id", ledgerId)
+    .order("created_at", { ascending: false })
+    .range(15, 999);
+  if (overflow && overflow.length > 0) {
+    await supabase.from("notifications").delete().in("id", overflow.map((r) => r.id));
+  }
+  return {
+    id: data.id,
+    message: data.message,
+    type: data.type,
+    read: data.read,
+    createdAt: new Date(data.created_at).getTime(),
+  };
+}
+
+export async function markNotificationsRead(ledgerId) {
+  const { error } = await supabase.from("notifications").update({ read: true }).eq("ledger_id", ledgerId).eq("read", false);
+  if (error) throw error;
+}

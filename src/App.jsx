@@ -8,7 +8,7 @@ import {
   MoreHorizontal, Plus, Trash2, Pencil, LogOut, X, Check,
   ChevronLeft, ChevronRight, Receipt, Target, AlertTriangle, Send, Download, Users, Mail, FileSpreadsheet,
   Banknote, CreditCard, Landmark, Wallet, ChevronDown, BookMarked, Settings, KeyRound,
-  TrendingUp, Repeat, Search, RotateCcw, BarChart3, History, ShieldCheck, Camera, WifiOff, ImageOff, Upload, PiggyBank, CalendarDays,
+  TrendingUp, Repeat, Search, RotateCcw, BarChart3, History, ShieldCheck, Camera, WifiOff, ImageOff, Upload, PiggyBank, CalendarDays, Bell,
 } from "lucide-react";
 import Papa from "papaparse";
 import { supabase } from "./supabaseClient";
@@ -23,6 +23,8 @@ import {
   deleteLedger, updateMemberDisplayName,
   fetchSavings, insertSavingsRemote, deleteSavingsRemote,
   fetchRecurringIncome, createRecurringIncome, deleteRecurringIncome, markRecurringIncomeGenerated,
+  fetchCardReminders, createCardReminder, deleteCardReminder, markCardReminderNotified,
+  fetchNotifications, insertNotification, markNotificationsRead,
 } from "./store";
 
 /* ---------------------------------------------------------------
@@ -1165,6 +1167,10 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [recurringOpen, setRecurringOpen] = useState(false);
   const [recurringTemplates, setRecurringTemplates] = useState([]);
   const [recurringIncomeTemplates, setRecurringIncomeTemplates] = useState([]);
+  const [cardReminders, setCardReminders] = useState([]);
+  const [cardRemindersOpen, setCardRemindersOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [recurringNotice, setRecurringNotice] = useState("");
   const [trendsOpen, setTrendsOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
@@ -1243,11 +1249,12 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           return;
         }
 
-        const [profileData, expenseRows, members, incomeRows, recurringRows, savingsRows, recurringIncomeRows] = await withTimeout(
+        const [profileData, expenseRows, members, incomeRows, recurringRows, savingsRows, recurringIncomeRows, cardReminderRows, notificationRows] = await withTimeout(
           Promise.all([
             fetchLedgerData(uid), fetchExpenses(uid), fetchMembers(uid).catch(() => []),
             fetchIncome(uid).catch(() => []), fetchRecurringExpenses(uid).catch(() => []),
             fetchSavings(uid).catch(() => []), fetchRecurringIncome(uid).catch(() => []),
+            fetchCardReminders(uid).catch(() => []), fetchNotifications(uid).catch(() => []),
           ]),
           8000
         );
@@ -1335,6 +1342,34 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         setRecurringIncomeTemplates(finalRecurringIncome);
         setIncome([...pendingIncome, ...finalIncome]);
         setExpenses([...pendingExpenses, ...finalExpenses]);
+
+        // Check for any card payment due tomorrow — generated at most once
+        // per card per month, the same lazy "check on next visit" pattern
+        // used for recurring expenses/income, since there's no server-side
+        // scheduler running independently of someone opening the app.
+        let finalCardReminders = cardReminderRows;
+        let finalNotifications = notificationRows;
+        const now = new Date();
+        const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        const dueTomorrow = cardReminderRows.filter((r) => r.dueDay === tomorrow.getDate() && r.lastNotifiedMonth !== nowMonthStr);
+        if (dueTomorrow.length > 0) {
+          const notifiedIds = new Set();
+          for (const reminder of dueTomorrow) {
+            try {
+              const notif = await insertNotification(uid, `Tomorrow is the last payment day for your ${reminder.cardName} card.`, "card_due");
+              finalNotifications = [notif, ...finalNotifications].slice(0, 15);
+              await markCardReminderNotified(reminder.id, nowMonthStr);
+              notifiedIds.add(reminder.id);
+            } catch {
+              // Skip a failed one rather than blocking the rest — it'll retry next visit.
+            }
+          }
+          finalCardReminders = cardReminderRows.map((r) => (
+            notifiedIds.has(r.id) ? { ...r, lastNotifiedMonth: nowMonthStr } : r
+          ));
+        }
+        setCardReminders(finalCardReminders);
+        setNotifications(finalNotifications);
 
         saveOfflineCache(uid, {
           categories: profileData.categories, budgets: profileData.budgets,
@@ -1828,6 +1863,38 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     }
   };
 
+  const handleAddCardReminder = async (reminder) => {
+    if (profile.isDemo) return;
+    if (!isOnline) throw new Error("This needs an internet connection.");
+    const created = await createCardReminder(uid, currentUserId, reminder);
+    setCardReminders((cur) => [...cur, created]);
+  };
+
+  const handleDeleteCardReminder = async (id) => {
+    if (!isOnline) { setError("Removing a card reminder needs an internet connection."); return; }
+    setCardReminders((cur) => cur.filter((x) => x.id !== id));
+    if (profile.isDemo) return;
+    try {
+      await deleteCardReminder(id);
+    } catch {
+      setError("Couldn't remove that reminder. Please try again.");
+    }
+  };
+
+  const handleOpenNotifications = async () => {
+    setNotificationsOpen(true);
+    if (profile.isDemo || !isOnline) return;
+    const hasUnread = notifications.some((n) => !n.read);
+    if (hasUnread) {
+      setNotifications((cur) => cur.map((n) => ({ ...n, read: true })));
+      try {
+        await markNotificationsRead(uid);
+      } catch {
+        // Not critical — the unread badge will just reappear as unread next load if this failed silently.
+      }
+    }
+  };
+
   // rows: [{ date, category, note, amount }, ...] — already parsed and
   // validated by CsvImportModal. Inserted one at a time (same pattern as
   // recurring-expense generation) so one bad row can't block the rest.
@@ -2092,6 +2159,22 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           <button className="icon-btn-hover" style={styles.iconGhostBtn} onClick={() => setTrendsOpen(true)} title="Spending trends">
             <BarChart3 size={16} />
           </button>
+          {!profile.isDemo && (
+            <button
+              className="icon-btn-hover"
+              style={{ ...styles.iconGhostBtn, position: "relative" }}
+              onClick={handleOpenNotifications}
+              title="Notifications"
+            >
+              <Bell size={16} />
+              {notifications.some((n) => !n.read) && (
+                <span style={{
+                  position: "absolute", top: 4, right: 4, width: 7, height: 7,
+                  borderRadius: "50%", background: T.brick, border: `1.5px solid ${T.forest}`,
+                }} />
+              )}
+            </button>
+          )}
           {!profile.isDemo && (
             <button className="icon-btn-hover" style={styles.iconGhostBtn} onClick={() => setActivityOpen(true)} title="Activity log">
               <History size={16} />
@@ -2830,6 +2913,24 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         />
       )}
 
+      {notificationsOpen && (
+        <NotificationsModal
+          notifications={notifications}
+          onManageReminders={() => { setNotificationsOpen(false); setCardRemindersOpen(true); }}
+          onClose={() => setNotificationsOpen(false)}
+        />
+      )}
+
+      {cardRemindersOpen && !profile.isDemo && (
+        <CardRemindersModal
+          paymentMethods={paymentMethods}
+          reminders={cardReminders}
+          onAdd={handleAddCardReminder}
+          onDelete={handleDeleteCardReminder}
+          onClose={() => setCardRemindersOpen(false)}
+        />
+      )}
+
       {confirmDialog && (
         <ConfirmModal
           title={confirmDialog.title}
@@ -3272,6 +3373,188 @@ function SavingsForm({ mode, currentBalance, onCancel, onSave }) {
 /* ================================================================
    RECURRING EXPENSES
 ================================================================= */
+/* ================================================================
+   CARD PAYMENT REMINDERS
+================================================================= */
+function CardRemindersModal({ paymentMethods, reminders, onAdd, onDelete, onClose }) {
+  const [creating, setCreating] = useState(false);
+  const [cardName, setCardName] = useState(paymentMethods[0] || "");
+  const [addingCustom, setAddingCustom] = useState(paymentMethods.length === 0);
+  const [customName, setCustomName] = useState("");
+  const [dueDay, setDueDay] = useState("1");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  const handleAdd = async (e) => {
+    e?.preventDefault?.();
+    setError("");
+    const finalName = addingCustom ? customName.trim() : cardName;
+    if (!finalName) return setError("Name the card.");
+    const day = parseInt(dueDay, 10);
+    if (!day || day < 1 || day > 31) return setError("Due day must be between 1 and 31.");
+    setBusy(true);
+    try {
+      await onAdd({ cardName: finalName, dueDay: day, note: note.trim() });
+      setCustomName(""); setNote(""); setCreating(false);
+    } catch (err) {
+      setError(err?.message || "Couldn't add that reminder. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: 0 }}>Card payment reminders</h2>
+          <button type="button" style={styles.iconGhostBtnDark} onClick={onClose}><X size={18} /></button>
+        </div>
+        <p style={{ fontSize: 13, opacity: 0.65, marginTop: 4 }}>
+          You'll get a notification the day before each card's payment is due, once a month.
+        </p>
+
+        {reminders.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+            {reminders.map((r) => (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <CreditCard size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{r.cardName}</div>
+                  <div style={{ fontSize: 12, opacity: 0.6 }}>Due day {r.dueDay}{r.note ? ` · ${r.note}` : ""}</div>
+                </div>
+                <button className="row-icon-hover" style={styles.rowIconBtn} onClick={() => setConfirmDeleteId(r.id)} title="Remove">
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!creating ? (
+          <button type="button" className="btn-lift" style={{ ...styles.secondaryBtn, marginTop: 14 }} onClick={() => setCreating(true)}>
+            <Plus size={16} /> New card reminder
+          </button>
+        ) : (
+          <div style={{ marginTop: 14 }}>
+            <label style={styles.label}>Card</label>
+            {!addingCustom ? (
+              <div style={{ display: "flex", gap: 8 }}>
+                <select style={styles.select} value={cardName} onChange={(e) => setCardName(e.target.value)}>
+                  {paymentMethods.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+                <button type="button" style={styles.secondaryBtnSmall} onClick={() => setAddingCustom(true)}>+ New</button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  autoFocus
+                  style={styles.textInput}
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="e.g. Amex Platinum"
+                  maxLength={24}
+                />
+                {paymentMethods.length > 0 && (
+                  <button type="button" style={styles.secondaryBtnSmall} onClick={() => setAddingCustom(false)}>Cancel</button>
+                )}
+              </div>
+            )}
+            <p style={{ fontSize: 11.5, opacity: 0.55, marginTop: 4 }}>
+              Picking one you've already set up as a payment method keeps things consistent — "+ New" is only
+              for a card you haven't added there yet.
+            </p>
+
+            <label style={styles.label}>Due day of month</label>
+            <input
+              type="number"
+              min="1"
+              max="31"
+              style={styles.textInput}
+              value={dueDay}
+              onChange={(e) => setDueDay(e.target.value)}
+            />
+
+            <label style={styles.label}>Note (optional)</label>
+            <input
+              style={styles.textInput}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAdd(e)}
+              placeholder="e.g. Minimum due 500"
+              maxLength={60}
+            />
+
+            {error && <p style={styles.errorText}>{error}</p>}
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <button type="button" style={styles.textBtn} onClick={() => { setCreating(false); setError(""); }}>Cancel</button>
+              <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} disabled={busy} onClick={handleAdd}>
+                {busy ? "Adding…" : "Add"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {confirmDeleteId && (
+        <ConfirmModal
+          title="Remove this card reminder?"
+          onConfirm={() => { onDelete(confirmDeleteId); setConfirmDeleteId(null); }}
+          onCancel={() => setConfirmDeleteId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
+   NOTIFICATIONS PANEL
+================================================================= */
+function NotificationsModal({ notifications, onManageReminders, onClose }) {
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: 0 }}>Notifications</h2>
+          <button type="button" style={styles.iconGhostBtnDark} onClick={onClose}><X size={18} /></button>
+        </div>
+        <p style={{ fontSize: 12, opacity: 0.55, marginTop: 4 }}>
+          Keeps the most recent 15 — older ones are removed automatically as new ones arrive.
+        </p>
+
+        {notifications.length === 0 ? (
+          <p style={{ fontSize: 13.5, opacity: 0.6, textAlign: "center", padding: "30px 0" }}>
+            Nothing here yet.
+          </p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10, maxHeight: 360, overflowY: "auto" }}>
+            {notifications.map((n) => (
+              <div key={n.id} style={{
+                display: "flex", gap: 10, padding: "10px 12px", borderRadius: 10,
+                background: n.read ? "transparent" : `${T.gold}18`,
+              }}>
+                <Bell size={14} style={{ opacity: 0.5, flexShrink: 0, marginTop: 2 }} />
+                <div>
+                  <div style={{ fontSize: 13.5 }}>{n.message}</div>
+                  <div style={{ fontSize: 11.5, opacity: 0.55, marginTop: 2 }}>
+                    {new Date(n.createdAt).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button type="button" style={{ ...styles.secondaryBtn, marginTop: 16 }} onClick={onManageReminders}>
+          <CreditCard size={16} /> Manage card payment reminders
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete, incomeTemplates, onAddIncome, onDeleteIncome, onClose }) {
   const [tab, setTab] = useState("expense"); // expense | income
   const [creating, setCreating] = useState(false);

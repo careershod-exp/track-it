@@ -353,5 +353,66 @@ create policy "insert recurring income in your ledgers" on recurring_income for 
     and exists (select 1 from ledger_members m where m.ledger_id = recurring_income.ledger_id and m.user_id = auth.uid())
   );
 
+create policy "update recurring income in your ledgers" on recurring_income for update
+  using (exists (select 1 from ledger_members m where m.ledger_id = recurring_income.ledger_id and m.user_id = auth.uid()));
+
 create policy "delete recurring income in your ledgers" on recurring_income for delete
   using (exists (select 1 from ledger_members m where m.ledger_id = recurring_income.ledger_id and m.user_id = auth.uid()));
+
+-- Card payment reminders -------------------------------------------------
+create table if not exists card_reminders (
+  id uuid primary key default gen_random_uuid(),
+  ledger_id uuid not null references ledgers(id) on delete cascade,
+  created_by uuid references auth.users(id) on delete set null,
+  card_name text not null,
+  due_day integer not null check (due_day between 1 and 31),
+  note text,
+  last_notified_month text,
+  created_at timestamptz not null default now()
+);
+create index if not exists card_reminders_ledger_id_idx on card_reminders (ledger_id);
+
+alter table card_reminders enable row level security;
+
+create policy "select card reminders in your ledgers" on card_reminders for select
+  using (exists (select 1 from ledger_members m where m.ledger_id = card_reminders.ledger_id and m.user_id = auth.uid()));
+
+create policy "insert card reminders in your ledgers" on card_reminders for insert
+  with check (
+    created_by = auth.uid()
+    and exists (select 1 from ledger_members m where m.ledger_id = card_reminders.ledger_id and m.user_id = auth.uid())
+  );
+
+create policy "update card reminders in your ledgers" on card_reminders for update
+  using (exists (select 1 from ledger_members m where m.ledger_id = card_reminders.ledger_id and m.user_id = auth.uid()));
+
+create policy "delete card reminders in your ledgers" on card_reminders for delete
+  using (exists (select 1 from ledger_members m where m.ledger_id = card_reminders.ledger_id and m.user_id = auth.uid()));
+
+-- Notifications (bell icon) -----------------------------------------------
+-- Read state and the 15-item cap are shared per ledger, the same way the
+-- activity log is — not tracked separately per person. Older entries are
+-- deleted outright once a ledger has more than 15, not just hidden.
+create table if not exists notifications (
+  id uuid primary key default gen_random_uuid(),
+  ledger_id uuid not null references ledgers(id) on delete cascade,
+  message text not null,
+  type text not null default 'card_due',
+  read boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists notifications_ledger_id_idx on notifications (ledger_id, created_at desc);
+
+alter table notifications enable row level security;
+
+create policy "select notifications in your ledgers" on notifications for select
+  using (exists (select 1 from ledger_members m where m.ledger_id = notifications.ledger_id and m.user_id = auth.uid()));
+
+create policy "insert notifications in your ledgers" on notifications for insert
+  with check (exists (select 1 from ledger_members m where m.ledger_id = notifications.ledger_id and m.user_id = auth.uid()));
+
+create policy "update notifications in your ledgers" on notifications for update
+  using (exists (select 1 from ledger_members m where m.ledger_id = notifications.ledger_id and m.user_id = auth.uid()));
+
+create policy "delete notifications in your ledgers" on notifications for delete
+  using (exists (select 1 from ledger_members m where m.ledger_id = notifications.ledger_id and m.user_id = auth.uid()));
