@@ -1053,6 +1053,9 @@ function DataPolicyModal({ onClose }) {
           from Settings, or by contacting us using the link in the footer. Withdrawing consent doesn't affect the
           lawfulness of anything already processed beforehand.</p>
         </div>
+        <a href="/privacy/" target="_blank" rel="noopener noreferrer" style={{ fontSize: 12.5, color: T.ink, opacity: 0.6, display: "inline-block", marginTop: 4 }}>
+          View this as a webpage →
+        </a>
         <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, marginTop: 14 }} onClick={onClose}>
           Close
         </button>
