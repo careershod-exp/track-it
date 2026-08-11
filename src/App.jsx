@@ -123,6 +123,28 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Dates are always stored and filtered as "YYYY-MM-DD" internally — that
+// format sorts correctly as plain text and is what <input type="date">
+// requires. This only changes how a date is *displayed* to dd-mm-yyyy.
+function fmtDate(isoDate) {
+  if (!isoDate || typeof isoDate !== "string") return isoDate || "";
+  const parts = isoDate.slice(0, 10).split("-");
+  if (parts.length !== 3) return isoDate;
+  const [y, m, d] = parts;
+  return `${d}-${m}-${y}`;
+}
+
+// For full timestamps (activity log, notifications) — the date portion
+// uses the same dd-mm-yyyy format as everywhere else; the time portion
+// stays in the browser's locale format, since 12h vs 24h time isn't the
+// kind of ambiguity that day/month order is.
+function fmtDateTime(ms) {
+  const d = new Date(ms);
+  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${fmtDate(iso)} ${time}`;
+}
+
 function fmtNumber(n) {
   return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -2168,10 +2190,17 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
             >
               <Bell size={16} />
               {notifications.some((n) => !n.read) && (
-                <span style={{
-                  position: "absolute", top: 4, right: 4, width: 7, height: 7,
-                  borderRadius: "50%", background: T.brick, border: `1.5px solid ${T.forest}`,
-                }} />
+                <span
+                  className="notif-badge-pulse"
+                  style={{
+                    position: "absolute", top: -3, right: -3, minWidth: 16, height: 16, padding: "0 3px",
+                    borderRadius: 8, background: T.brick, border: `2px solid ${T.forest}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 9.5, fontWeight: 700, color: "#fff", lineHeight: 1,
+                  }}
+                >
+                  {notifications.filter((n) => !n.read).length}
+                </span>
               )}
             </button>
           )}
@@ -2238,7 +2267,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         </div>
         <div style={styles.printMeta}>
           <span>{MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear()}</span>
-          <span>Generated {new Date().toLocaleDateString()}</span>
+          <span>Generated {fmtDate(todayISO())}</span>
         </div>
         <div style={styles.printTotalRow}>
           <span>Total spent</span>
@@ -2280,7 +2309,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
             <tbody>
               {visibleList.map((x) => (
                 <tr key={x.id}>
-                  <td style={styles.printTd}>{new Date(x.date).toLocaleDateString()}</td>
+                  <td style={styles.printTd}>{fmtDate(x.date)}</td>
                   <td style={styles.printTd}>{x.category}</td>
                   <td style={styles.printTd}>{x.note || ""}</td>
                   <td style={styles.printTd}>{x.paymentMethod || ""}</td>
@@ -2534,7 +2563,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                 {savings.slice(0, 20).map((s) => (
                   <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
                     <span style={{ flex: 1, opacity: 0.75 }}>
-                      {s.date} {s.note ? `· ${s.note}` : Number(s.amount) < 0 ? "· Taken from savings" : ""}
+                      {fmtDate(s.date)} {s.note ? `· ${s.note}` : Number(s.amount) < 0 ? "· Taken from savings" : ""}
                     </span>
                     <Money amount={s.amount} size={12} color={Number(s.amount) < 0 ? T.brick : T.gold} />
                     <button
@@ -2670,7 +2699,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 14.5 }}>{x.category}</div>
                       <div style={{ fontSize: 12.5, opacity: 0.6 }}>
-                        {x.date} {x.note ? `· ${x.note}` : ""} {addedByName ? `· added by ${addedByName}` : ""} {x.pendingSync ? "· syncing…" : ""}
+                        {fmtDate(x.date)} {x.note ? `· ${x.note}` : ""} {addedByName ? `· added by ${addedByName}` : ""} {x.pendingSync ? "· syncing…" : ""}
                       </div>
                     </div>
                     <div style={styles.rowAmount}><Money amount={Number(x.amount)} size={13.5} /></div>
@@ -2737,7 +2766,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                   <span style={{ ...styles.rowDot, background: T.sage }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 14.5 }}>{x.source}</div>
-                    <div style={{ fontSize: 12.5, opacity: 0.6 }}>{x.date} {x.note ? `· ${x.note}` : ""} {x.pendingSync ? "· syncing…" : ""}</div>
+                    <div style={{ fontSize: 12.5, opacity: 0.6 }}>{fmtDate(x.date)} {x.note ? `· ${x.note}` : ""} {x.pendingSync ? "· syncing…" : ""}</div>
                   </div>
                   <div style={styles.rowAmount}><Money amount={Number(x.amount)} size={13.5} color={T.sage} /></div>
                   <button
@@ -3539,7 +3568,7 @@ function NotificationsModal({ notifications, onManageReminders, onClose }) {
                 <div>
                   <div style={{ fontSize: 13.5 }}>{n.message}</div>
                   <div style={{ fontSize: 11.5, opacity: 0.55, marginTop: 2 }}>
-                    {new Date(n.createdAt).toLocaleString()}
+                    {fmtDateTime(n.createdAt)}
                   </div>
                 </div>
               </div>
@@ -4515,7 +4544,7 @@ function ActivityLogModal({ ledgerId, onClose }) {
                   <strong>{e.displayName || "Someone"}</strong> {e.detail}
                 </div>
                 <div style={{ fontSize: 11.5, opacity: 0.55, marginTop: 2 }}>
-                  {new Date(e.createdAt).toLocaleString()}
+                  {fmtDateTime(e.createdAt)}
                 </div>
               </div>
             ))}
@@ -5333,6 +5362,14 @@ button { font-family: inherit; }
 @keyframes printIn {
   from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 0.9; transform: translateY(0); }
+}
+
+.notif-badge-pulse {
+  animation: notifPulse 1.8s ease-in-out infinite;
+}
+@keyframes notifPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(166,52,70,0.55); }
+  50% { box-shadow: 0 0 0 5px rgba(166,52,70,0); }
 }
 
 @keyframes tickerScroll {
