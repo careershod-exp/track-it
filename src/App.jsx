@@ -2372,18 +2372,18 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       <main className="main-grid" style={styles.mainGrid}>
         <section style={styles.leftCol}>
           <div style={{ ...styles.card, padding: "16px 18px" }}>
-            <div style={{ ...styles.monthNav, marginBottom: 6 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "34px 1fr 34px", alignItems: "center", marginBottom: 6 }}>
               <button style={styles.iconGhostBtnDark} onClick={() => { setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); setSelectedDate(null); }}>
                 <ChevronLeft size={18} />
               </button>
               <button
                 type="button"
                 onClick={() => setCalendarOpen(true)}
-                style={{ ...styles.monthLabel, background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                style={{ ...styles.monthLabel, minWidth: 0, width: "100%", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
                 title="View calendar"
               >
                 {MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear()}
-                <CalendarDays size={15} style={{ opacity: 0.5 }} />
+                <CalendarDays size={15} style={{ opacity: 0.5, flexShrink: 0 }} />
               </button>
               <button style={styles.iconGhostBtnDark} onClick={() => { setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); setSelectedDate(null); }}>
                 <ChevronRight size={18} />
@@ -2642,6 +2642,12 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           <div style={styles.searchRow}>
             <Search size={15} style={{ opacity: 0.5, flexShrink: 0 }} />
             <input
+              type="search"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck="false"
+              name="track-it-search"
               style={styles.searchInput}
               placeholder="Search notes, categories, payment method"
               value={searchQuery}
