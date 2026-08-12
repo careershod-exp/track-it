@@ -23,8 +23,16 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globIgnores: ["**/.well-known/**", "**/privacy/**"],
-        navigateFallbackDenylist: [/^\/rest\//, /^\/auth\//, /^\/\.well-known\//, /^\/privacy\//],
+        // Never precache anything under /.well-known/ or /privacy/ — these
+        // need to always be fetched fresh from the network, never served
+        // from an old cached copy frozen at whatever they looked like when
+        // the app was first built.
+        globIgnores: ["**/.well-known/**", "**/privacy/**", "**/terms/**", "**/delete-account/**"],
+        // Never cache Supabase API calls — this app's data must always be
+        // fresh, not served from an offline cache pretending to be current.
+        // Also never intercept /.well-known/ or /privacy/ — both need to be
+        // served as real files, not swapped for the app's own login screen.
+        navigateFallbackDenylist: [/^\/rest\//, /^\/auth\//, /^\/\.well-known\//, /^\/privacy\//, /^\/terms\//, /^\/delete-account\//],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.hostname.endsWith(".supabase.co"),

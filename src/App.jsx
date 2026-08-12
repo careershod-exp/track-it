@@ -4478,6 +4478,12 @@ function SettingsModal({ userEmail, ledgerName, currency, onChangeCurrency, onCl
         <button type="button" className="btn-lift" style={styles.primaryBtn} disabled={busy} onClick={handleChangePassword}>
           {busy ? "Updating…" : "Update password"}
         </button>
+
+        <div style={{ marginTop: 26, paddingTop: 16, borderTop: `1px solid ${T.parchmentDim}`, textAlign: "center" }}>
+          <a href="/delete-account/" target="_blank" rel="noopener noreferrer" style={{ fontSize: 12.5, color: T.brick, opacity: 0.75 }}>
+            Delete my account
+          </a>
+        </div>
       </div>
     </div>
   );
