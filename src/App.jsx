@@ -918,6 +918,7 @@ function CompleteProfileModal({ onSaved }) {
           age_range: ageRange,
           gender: gender || null,
           profile_consent_at: new Date().toISOString(),
+          terms_accepted_at: new Date().toISOString(),
         },
       });
       if (err) throw err;
@@ -1028,7 +1029,11 @@ function CompleteProfileModal({ onSaved }) {
               style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }}
             />
             <span style={{ fontSize: 12.5, opacity: 0.75, lineHeight: 1.4, textAlign: "left" }}>
-              I agree to the collection of this information as described in the{" "}
+              I agree to the{" "}
+              <a href="/terms/" target="_blank" rel="noopener noreferrer" style={{ color: T.ink, fontWeight: 700, textDecoration: "underline" }}>
+                Terms &amp; Conditions
+              </a>{" "}
+              and the collection of this information as described in the{" "}
               <button
                 type="button"
                 onClick={(e) => { e.preventDefault(); setPolicyOpen(true); }}
@@ -2133,16 +2138,21 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           {!profile.isDemo && ledgerList && ledgerList.length > 0 ? (
             <button
               className="icon-btn-hover"
-              style={{ ...styles.iconGhostBtn, gap: 6, padding: "6px 10px" }}
+              style={{ ...styles.iconGhostBtn, width: "auto", gap: 6, padding: "6px 10px", maxWidth: 160 }}
               onClick={() => setLedgerSwitcherOpen(true)}
-              title="Switch ledger"
+              title={profile.name}
             >
-              <BookMarked size={14} />
-              <span style={{ color: T.parchment, opacity: 0.85, fontSize: 14 }}>{profile.name}</span>
-              <ChevronDown size={13} />
+              <BookMarked size={14} style={{ flexShrink: 0 }} />
+              <span style={{ color: T.parchment, opacity: 0.85, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", maxWidth: 95 }}>{profile.name}</span>
+              <ChevronDown size={13} style={{ flexShrink: 0 }} />
             </button>
           ) : (
-            <span style={{ color: T.parchment, opacity: 0.85, fontSize: 14 }}>{profile.name}</span>
+            <span
+              title={profile.name}
+              style={{ color: T.parchment, opacity: 0.85, fontSize: 14, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block" }}
+            >
+              {profile.name}
+            </span>
           )}
           {!profile.isDemo && (
             <button className="icon-btn-hover" style={styles.iconGhostBtn} onClick={() => setMembersOpen(true)} title="Invite people to this ledger">
