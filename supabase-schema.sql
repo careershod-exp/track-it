@@ -416,3 +416,36 @@ create policy "update notifications in your ledgers" on notifications for update
 
 create policy "delete notifications in your ledgers" on notifications for delete
   using (exists (select 1 from ledger_members m where m.ledger_id = notifications.ledger_id and m.user_id = auth.uid()));
+
+-- Loans (given or taken) --------------------------------------------------
+create table if not exists loans (
+  id uuid primary key default gen_random_uuid(),
+  ledger_id uuid not null references ledgers(id) on delete cascade,
+  created_by uuid references auth.users(id) on delete set null,
+  loan_type text not null,
+  direction text not null check (direction in ('given', 'taken')),
+  person_or_lender text,
+  principal_amount numeric,
+  monthly_repayment numeric,
+  include_in_net_balance boolean not null default false,
+  note text,
+  created_at timestamptz not null default now()
+);
+create index if not exists loans_ledger_id_idx on loans (ledger_id);
+
+alter table loans enable row level security;
+
+create policy "select loans in your ledgers" on loans for select
+  using (exists (select 1 from ledger_members m where m.ledger_id = loans.ledger_id and m.user_id = auth.uid()));
+
+create policy "insert loans in your ledgers" on loans for insert
+  with check (
+    created_by = auth.uid()
+    and exists (select 1 from ledger_members m where m.ledger_id = loans.ledger_id and m.user_id = auth.uid())
+  );
+
+create policy "update loans in your ledgers" on loans for update
+  using (exists (select 1 from ledger_members m where m.ledger_id = loans.ledger_id and m.user_id = auth.uid()));
+
+create policy "delete loans in your ledgers" on loans for delete
+  using (exists (select 1 from ledger_members m where m.ledger_id = loans.ledger_id and m.user_id = auth.uid()));

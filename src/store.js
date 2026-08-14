@@ -654,3 +654,88 @@ export async function markNotificationsRead(ledgerId) {
   const { error } = await supabase.from("notifications").update({ read: true }).eq("ledger_id", ledgerId).eq("read", false);
   if (error) throw error;
 }
+
+/* ---------------------------------------------------------------
+   Editing a savings entry
+------------------------------------------------------------------ */
+export async function updateSavingsRemote(savingsId, patch) {
+  const { error } = await supabase
+    .from("savings")
+    .update({ date: patch.date, note: patch.note || null, amount: patch.amount })
+    .eq("id", savingsId);
+  if (error) throw error;
+}
+
+/* ---------------------------------------------------------------
+   Loans (given or taken)
+------------------------------------------------------------------ */
+export async function fetchLoans(ledgerId) {
+  const { data, error } = await supabase
+    .from("loans")
+    .select("id,loan_type,direction,person_or_lender,principal_amount,monthly_repayment,include_in_net_balance,note,created_at")
+    .eq("ledger_id", ledgerId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    id: row.id,
+    loanType: row.loan_type,
+    direction: row.direction,
+    personOrLender: row.person_or_lender || "",
+    principalAmount: row.principal_amount != null ? Number(row.principal_amount) : null,
+    monthlyRepayment: row.monthly_repayment != null ? Number(row.monthly_repayment) : null,
+    includeInNetBalance: row.include_in_net_balance,
+    note: row.note || "",
+    createdAt: new Date(row.created_at).getTime(),
+  }));
+}
+
+export async function createLoan(ledgerId, createdBy, loan) {
+  const { data, error } = await supabase
+    .from("loans")
+    .insert({
+      ledger_id: ledgerId,
+      created_by: createdBy,
+      loan_type: loan.loanType,
+      direction: loan.direction,
+      person_or_lender: loan.personOrLender || null,
+      principal_amount: loan.principalAmount || null,
+      monthly_repayment: loan.monthlyRepayment || null,
+      include_in_net_balance: loan.includeInNetBalance,
+      note: loan.note || null,
+    })
+    .select("id,loan_type,direction,person_or_lender,principal_amount,monthly_repayment,include_in_net_balance,note,created_at")
+    .single();
+  if (error) throw error;
+  return {
+    id: data.id,
+    loanType: data.loan_type,
+    direction: data.direction,
+    personOrLender: data.person_or_lender || "",
+    principalAmount: data.principal_amount != null ? Number(data.principal_amount) : null,
+    monthlyRepayment: data.monthly_repayment != null ? Number(data.monthly_repayment) : null,
+    includeInNetBalance: data.include_in_net_balance,
+    note: data.note || "",
+    createdAt: new Date(data.created_at).getTime(),
+  };
+}
+
+export async function updateLoan(loanId, loan) {
+  const { error } = await supabase
+    .from("loans")
+    .update({
+      loan_type: loan.loanType,
+      direction: loan.direction,
+      person_or_lender: loan.personOrLender || null,
+      principal_amount: loan.principalAmount || null,
+      monthly_repayment: loan.monthlyRepayment || null,
+      include_in_net_balance: loan.includeInNetBalance,
+      note: loan.note || null,
+    })
+    .eq("id", loanId);
+  if (error) throw error;
+}
+
+export async function deleteLoan(loanId) {
+  const { error } = await supabase.from("loans").delete().eq("id", loanId);
+  if (error) throw error;
+}
