@@ -2732,13 +2732,13 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                         {l.direction === "given" ? "Given" : "Taken"}{l.includeInNetBalance ? " · in Net Balance" : ""}{l.note ? ` · ${l.note}` : ""}
                       </div>
                     </div>
-                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flexShrink: 0 }}>
                       <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 13.5 }}>
                         <Money amount={l.principalAmount} size={13} />
                       </div>
                       {l.monthlyRepayment > 0 && (
-                        <div style={{ fontSize: 10.5, opacity: 0.55, marginTop: 1 }}>
-                          <Money amount={l.monthlyRepayment} size={10} />/mo
+                        <div style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 10.5, opacity: 0.55, marginTop: 2 }}>
+                          <Money amount={l.monthlyRepayment} size={10} /><span>/mo</span>
                         </div>
                       )}
                     </div>
