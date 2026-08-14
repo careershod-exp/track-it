@@ -145,6 +145,27 @@ function fmtDateTime(ms) {
   return `${fmtDate(iso)} ${time}`;
 }
 
+// Recharts' built-in Tooltip colors each item's *name* text using that
+// series' own color (a pie slice's fill, a bar's fill) — not whatever
+// itemStyle/contentStyle says. For darker palette colors, that means dark
+// text on our dark tooltip background, unreadable. A fully custom
+// renderer sidesteps this entirely: every bit of text here is always the
+// same fixed, legible color, regardless of what color the data itself is.
+function ChartTooltip({ active, payload, label, formatter }) {
+  if (!active || !payload || payload.length === 0) return null;
+  return (
+    <div style={{ background: T.ink, borderRadius: 8, padding: "8px 12px", fontSize: 13 }}>
+      {label && <div style={{ color: T.parchment, opacity: 0.7, fontSize: 11.5, marginBottom: 3 }}>{label}</div>}
+      {payload.map((entry, i) => (
+        <div key={i} style={{ color: T.parchment, display: "flex", alignItems: "center", gap: 6 }}>
+          {entry.color && <span style={{ width: 8, height: 8, borderRadius: "50%", background: entry.color, flexShrink: 0 }} />}
+          <span>{entry.name}: {formatter ? formatter(entry.value) : entry.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function fmtNumber(n) {
   return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -1203,7 +1224,6 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [activityOpen, setActivityOpen] = useState(false);
   const [currency, setCurrency] = useState("AED");
   const [searchQuery, setSearchQuery] = useState("");
-  const [pendingDelete, setPendingDelete] = useState(null); // { item, timeoutId } for undo
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -1671,7 +1691,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   };
 
   const commitDelete = async (item) => {
-    if (profile.isDemo) return;
+    if (profile.isDemo) { setExpenses((cur) => cur.filter((x) => x.id !== item.id)); return; }
+    setExpenses((cur) => cur.filter((x) => x.id !== item.id));
     if (item.pendingSync) {
       // Never made it to the server yet — just drop it from the local queue,
       // no network round trip (and nothing there to conflict with) needed.
@@ -1696,27 +1717,11 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       setError("Deleting needs an internet connection.");
       return;
     }
-    setExpenses((cur) => cur.filter((x) => x.id !== id));
-    if (pendingDelete) {
-      // Only one undo slot at a time — committing the previous pending item
-      // now (rather than just cancelling its timer) is what actually
-      // deletes it remotely; clearing the timer alone would have silently
-      // left it undeleted in the database forever.
-      clearTimeout(pendingDelete.timeoutId);
-      commitDelete(pendingDelete.item);
-    }
-    const timeoutId = setTimeout(() => {
-      setPendingDelete(null);
-      commitDelete(item);
-    }, 5000);
-    setPendingDelete({ item, timeoutId });
-  };
-
-  const handleUndoDelete = () => {
-    if (!pendingDelete) return;
-    clearTimeout(pendingDelete.timeoutId);
-    setExpenses((cur) => [pendingDelete.item, ...cur]);
-    setPendingDelete(null);
+    setConfirmDialog({
+      title: "Delete this expense?",
+      message: `${item.category} · ${fmtMoneyLocal(item.amount)}`,
+      onConfirm: () => commitDelete(item),
+    });
   };
 
   const finishIncomeForm = () => {
@@ -2370,15 +2375,6 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         </div>
       )}
 
-      {pendingDelete && (
-        <div style={styles.undoToast}>
-          <span>Deleted "{pendingDelete.item.category}"</span>
-          <button style={styles.undoBtn} onClick={handleUndoDelete}>
-            <RotateCcw size={13} /> Undo
-          </button>
-        </div>
-      )}
-
       <main className="main-grid" style={styles.mainGrid}>
         <section style={styles.leftCol}>
           <div style={{ ...styles.card, padding: "16px 18px" }}>
@@ -2415,7 +2411,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
             <div style={{ ...styles.totalRow, marginBottom: 4 }}>
               <span style={{ fontSize: 12.5, opacity: 0.6 }}>Spent this month</span>
               <span style={{ ...styles.totalNumber, fontSize: 28 }}><Money amount={monthTotal} size={22} /></span>
-              {budgets.overall > 0 ? (
+              {budgets.overall > 0 && (
                 <div style={{ width: "100%", marginTop: 6 }}>
                   <div style={styles.progressTrack}>
                     <div style={{
@@ -2425,41 +2421,43 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                     }} />
                   </div>
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setBudgetFormOpen(true)}
-                  style={{
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                    width: "100%", marginTop: 8, padding: "8px 10px", borderRadius: 10,
-                    border: `1.5px dashed ${T.parchmentDim}`, background: "transparent",
-                    color: T.ink, opacity: 0.75, fontSize: 12, cursor: "pointer",
-                  }}
-                >
-                  <Target size={13} /> No budget set yet — tap to set one
-                </button>
               )}
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, width: "100%", marginTop: 12 }}>
-                {budgets.overall > 0 && (
+                {budgets.overall > 0 ? (
                   <div style={{ ...styles.statPill, background: "#25344F" }}>
                     <span style={{ ...styles.statPillLabel, color: "#9DB4D9" }}><Target size={11} /> Budget</span>
                     <span style={{ ...styles.statPillValue, color: "#9DB4D9" }}><Money amount={budgets.overall} size={15} color="#9DB4D9" /></span>
                   </div>
+                ) : (
+                  <button type="button" onClick={() => setBudgetFormOpen(true)} style={styles.statPillEmpty}>
+                    <Target size={13} /> No budget set yet — tap to set one
+                  </button>
                 )}
-                {(monthIncomeTotal > 0 || income.length > 0) && (
+
+                {(monthIncomeTotal > 0 || income.length > 0) ? (
                   <div style={{ ...styles.statPill, background: "#1E3E28" }}>
                     <span style={{ ...styles.statPillLabel, color: "#8FCB94" }}><TrendingUp size={11} /> Income</span>
                     <span style={{ ...styles.statPillValue, color: "#8FCB94" }}><Money amount={monthIncomeTotal} size={15} color="#8FCB94" /></span>
                   </div>
+                ) : (
+                  <button type="button" onClick={() => setIncomeFormOpen(true)} style={styles.statPillEmpty}>
+                    <TrendingUp size={13} /> No income logged yet — tap to log
+                  </button>
                 )}
-                {savings.length > 0 && (
+
+                {savings.length > 0 ? (
                   <div style={{ ...styles.statPill, background: "#4A3814" }}>
                     <span style={{ ...styles.statPillLabel, color: "#E8C766" }}><PiggyBank size={11} /> Savings</span>
                     <span style={{ ...styles.statPillValue, color: "#E8C766" }}><Money amount={savingsCumulativeTotal} size={15} color="#E8C766" /></span>
                   </div>
+                ) : (
+                  <button type="button" onClick={() => setSavingsFormOpen("add")} style={styles.statPillEmpty}>
+                    <PiggyBank size={13} /> No savings yet — tap to add
+                  </button>
                 )}
-                {(monthIncomeTotal > 0 || income.length > 0 || savingsCumulativeTotal !== 0 || savings.length > 0) && (
+
+                {(monthIncomeTotal > 0 || income.length > 0 || savingsCumulativeTotal !== 0 || savings.length > 0 || monthExpenses.length > 0) ? (
                   <div style={{ ...styles.statPill, background: monthNet >= 0 ? T.ink : "#4A1E24" }}>
                     <span style={{ ...styles.statPillLabel, color: monthNet >= 0 ? T.parchment : "#E89AA3", opacity: 0.75 }}>
                       <Wallet size={11} /> Net balance
@@ -2467,6 +2465,10 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                     <span style={{ ...styles.statPillValue, color: monthNet >= 0 ? T.parchment : "#E89AA3" }}>
                       <Money amount={monthNet} size={15} color={monthNet >= 0 ? T.parchment : "#E89AA3"} />
                     </span>
+                  </div>
+                ) : (
+                  <div style={{ ...styles.statPillEmpty, cursor: "default" }}>
+                    <Wallet size={13} /> Nothing tracked yet
                   </div>
                 )}
               </div>
@@ -2479,7 +2481,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                     <Pie data={breakdown} dataKey="value" nameKey="name" innerRadius={36} outerRadius={60} paddingAngle={2}>
                       {breakdown.map((entry, i) => <Cell key={i} fill={entry.color} stroke="none" />)}
                     </Pie>
-                    <Tooltip formatter={(v) => fmtMoneyLocal(v)} contentStyle={{ background: T.ink, border: "none", borderRadius: 8, color: T.parchment, fontSize: 13 }} />
+                    <Tooltip content={<ChartTooltip formatter={fmtMoneyLocal} />} />
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
@@ -2613,7 +2615,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                       <Pie data={paymentBreakdown} dataKey="value" nameKey="name" innerRadius={28} outerRadius={46} paddingAngle={2}>
                         {paymentBreakdown.map((entry, i) => <Cell key={i} fill={entry.color} stroke="none" />)}
                       </Pie>
-                      <Tooltip formatter={(v) => fmtMoneyLocal(v)} contentStyle={{ background: T.ink, border: "none", borderRadius: 8, color: T.parchment, fontSize: 13 }} />
+                      <Tooltip content={<ChartTooltip formatter={fmtMoneyLocal} />} />
                     </PieChart>
                   </ResponsiveContainer>
                 ) : (
@@ -3246,6 +3248,7 @@ function IncomeForm({ onCancel, onSave }) {
   const [date, setDate] = useState(todayISO());
   const [note, setNote] = useState("");
   const [repeatMonthly, setRepeatMonthly] = useState(SUGGESTED_INCOME_SOURCES[0] === "Salary");
+  const [repeatDay, setRepeatDay] = useState(String(new Date().getDate()));
   const [err, setErr] = useState("");
 
   // Salary is the one source that's overwhelmingly recurring in practice —
@@ -3264,7 +3267,12 @@ function IncomeForm({ onCancel, onSave }) {
     if (!date) return setErr("Pick a date.");
     const finalSource = addingCustom ? customSource.trim() : source;
     if (!finalSource) return setErr("Name the income source.");
-    const dayOfMonth = new Date(date + "T00:00:00").getDate();
+    let dayOfMonth = new Date(date + "T00:00:00").getDate();
+    if (repeatMonthly) {
+      const parsedDay = parseInt(repeatDay, 10);
+      if (!parsedDay || parsedDay < 1 || parsedDay > 31) return setErr("Day of month must be between 1 and 31.");
+      dayOfMonth = parsedDay;
+    }
     onSave({ amount: amt, source: finalSource, date, note: note.trim(), repeatMonthly, dayOfMonth });
   };
 
@@ -3331,6 +3339,23 @@ function IncomeForm({ onCancel, onSave }) {
           />
           <span style={{ fontSize: 13 }}>Repeat this every month</span>
         </label>
+
+        {repeatMonthly && (
+          <div style={{ marginTop: 10 }}>
+            <label style={styles.label}>Repeats on day</label>
+            <input
+              type="number"
+              min="1"
+              max="31"
+              style={styles.textInput}
+              value={repeatDay}
+              onChange={(e) => setRepeatDay(e.target.value)}
+            />
+            <p style={{ fontSize: 11.5, opacity: 0.55, marginTop: 4 }}>
+              Which day of the month this repeats on — doesn't have to match today's date above.
+            </p>
+          </div>
+        )}
 
         {err && <p style={styles.errorText}>{err}</p>}
 
@@ -4514,7 +4539,7 @@ function TrendsModal({ data, currencySymbol, onClose }) {
                 <CartesianGrid strokeDasharray="3 3" stroke={T.parchmentDim} vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 10.5, fill: T.ink }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 10.5, fill: T.ink }} axisLine={false} tickLine={false} />
-                <Tooltip formatter={(v) => `${currencySymbol} ${fmtNumber(v)}`} contentStyle={{ background: T.ink, border: "none", borderRadius: 8, color: T.parchment, fontSize: 12.5 }} />
+                <Tooltip content={<ChartTooltip formatter={(v) => `${currencySymbol} ${fmtNumber(v)}`} />} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Bar dataKey="spent" name="Spent" fill={T.brick} radius={[3, 3, 0, 0]} />
                 <Bar dataKey="income" name="Income" fill={T.sage} radius={[3, 3, 0, 0]} />
@@ -5223,16 +5248,6 @@ const styles = {
     display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
   },
   errorDismiss: { background: "none", border: "none", color: T.parchment, cursor: "pointer", opacity: 0.7 },
-  undoToast: {
-    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
-    background: T.ink, color: T.parchment, padding: "10px 14px", borderRadius: 10,
-    fontSize: 13, marginBottom: 16,
-  },
-  undoBtn: {
-    display: "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.12)",
-    border: "none", borderRadius: 8, color: T.parchment, padding: "6px 10px",
-    fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0,
-  },
 
   mainGrid: { display: "grid", gridTemplateColumns: "minmax(0,340px) minmax(0,1fr)", gap: 24 },
   leftCol: { display: "flex", flexDirection: "column", gap: 16 },
@@ -5254,6 +5269,12 @@ const styles = {
     textTransform: "uppercase", letterSpacing: 0.3, opacity: 0.7,
   },
   statPillValue: { fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15 },
+  statPillEmpty: {
+    flex: "1 1 110px", minWidth: 90, borderRadius: 12, padding: "10px 10px",
+    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
+    border: `1.5px dashed ${T.parchmentDim}`, background: "transparent",
+    color: T.ink, opacity: 0.65, fontSize: 11, textAlign: "center", cursor: "pointer", lineHeight: 1.3,
+  },
   progressTrack: { width: "100%", height: 7, borderRadius: 4, background: T.parchmentDim, overflow: "hidden", boxShadow: "inset 0 1px 2px rgba(0,0,0,0.08)" },
   progressFill: { height: "100%", borderRadius: 4, transition: "width 0.3s ease" },
   emptyRingWrap: { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" },
