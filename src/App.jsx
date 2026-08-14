@@ -25,7 +25,7 @@ import {
   fetchRecurringIncome, createRecurringIncome, deleteRecurringIncome, markRecurringIncomeGenerated,
   fetchCardReminders, createCardReminder, deleteCardReminder, markCardReminderNotified,
   fetchNotifications, insertNotification, markNotificationsRead,
-  updateSavingsRemote, fetchLoans, createLoan, updateLoan, deleteLoan,
+  updateSavingsRemote, fetchLoans, createLoan, updateLoan, deleteLoan, updateIncomeRemote,
 } from "./store";
 
 /* ---------------------------------------------------------------
@@ -1214,6 +1214,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [savings, setSavings] = useState([]);
   const [savingsFormOpen, setSavingsFormOpen] = useState(false); // false | "add" | "withdraw"
   const [editingSavings, setEditingSavings] = useState(null); // the savings entry being edited, or null
+  const [editingIncome, setEditingIncome] = useState(null); // the income entry being edited, or null
   const [loans, setLoans] = useState([]);
   const [loanFormOpen, setLoanFormOpen] = useState(false); // false | "add" | a loan object being edited
   const [monthEndPromptOpen, setMonthEndPromptOpen] = useState(false);
@@ -1839,6 +1840,20 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     try {
       await withTimeout(updateSavingsRemote(id, payload), 8000);
       logActivity(uid, currentUserId, myDisplayName, `edited a savings entry (${fmtMoneyLocal(Math.abs(payload.amount))})`).catch(() => {});
+    } catch {
+      setError("Saved locally, but syncing failed.");
+    }
+  };
+
+  const handleUpdateIncome = async (payload) => {
+    if (!isOnline) { setError("Editing needs an internet connection."); return; }
+    const id = editingIncome.id;
+    setIncome((cur) => cur.map((x) => (x.id === id ? { ...x, ...payload } : x)));
+    setEditingIncome(null);
+    if (profile.isDemo) return;
+    try {
+      await withTimeout(updateIncomeRemote(id, payload), 8000);
+      logActivity(uid, currentUserId, myDisplayName, `edited income "${payload.source}" (${fmtMoneyLocal(payload.amount)})`).catch(() => {});
     } catch {
       setError("Saved locally, but syncing failed.");
     }
@@ -2631,8 +2646,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 
           <div style={{ ...styles.card, padding: "14px 18px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 13, opacity: 0.6, display: "flex", alignItems: "center", gap: 6 }}>
-                <PiggyBank size={14} /> Total savings
+              <span style={{ fontSize: 14.5, opacity: 1, color: T.ink, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+                <PiggyBank size={15} /> Total savings
               </span>
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 800, fontSize: 18 }}>
                 <Money amount={savingsCumulativeTotal} size={17} color={T.gold} />
@@ -2679,21 +2694,21 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 
           <div style={{ ...styles.card, padding: "14px 18px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 13, opacity: 0.6, display: "flex", alignItems: "center", gap: 6 }}>
-                <Landmark size={14} /> Loans — Given / Taken
+              <span style={{ fontSize: 14.5, opacity: 1, color: T.ink, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+                <Landmark size={15} /> Loans — Given / Taken
               </span>
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 8, marginBottom: 4 }}>
-              <div style={{ flex: 1, background: "#1E3E28", borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
-                <div style={{ fontSize: 10.5, color: "#8FCB94", opacity: 0.8, fontWeight: 700, textTransform: "uppercase" }}>Given</div>
-                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#8FCB94" }}>
-                  <Money amount={loansGivenTotal} size={13} color="#8FCB94" />
+            <div style={{ display: "flex", gap: 6, marginTop: 8, marginBottom: 4 }}>
+              <div style={{ background: "#1E3E28", borderRadius: 8, padding: "5px 12px", textAlign: "center" }}>
+                <div style={{ fontSize: 9, color: "#8FCB94", opacity: 0.8, fontWeight: 700, textTransform: "uppercase" }}>Given</div>
+                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 12, color: "#8FCB94" }}>
+                  <Money amount={loansGivenTotal} size={11} color="#8FCB94" />
                 </div>
               </div>
-              <div style={{ flex: 1, background: "#4A1E24", borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
-                <div style={{ fontSize: 10.5, color: "#E89AA3", opacity: 0.8, fontWeight: 700, textTransform: "uppercase" }}>Taken</div>
-                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#E89AA3" }}>
-                  <Money amount={loansTakenTotal} size={13} color="#E89AA3" />
+              <div style={{ background: "#4A1E24", borderRadius: 8, padding: "5px 12px", textAlign: "center" }}>
+                <div style={{ fontSize: 9, color: "#E89AA3", opacity: 0.8, fontWeight: 700, textTransform: "uppercase" }}>Taken</div>
+                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 12, color: "#E89AA3" }}>
+                  <Money amount={loansTakenTotal} size={11} color="#E89AA3" />
                 </div>
               </div>
             </div>
@@ -2714,10 +2729,18 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                         {l.loanType}{l.personOrLender ? ` · ${l.personOrLender}` : ""}
                       </div>
                       <div style={{ fontSize: 11.5, opacity: 0.6 }}>
-                        {l.principalAmount ? <>Principal: <Money amount={l.principalAmount} size={11} /> · </> : ""}
-                        {l.monthlyRepayment ? <>Monthly: <Money amount={l.monthlyRepayment} size={11} /></> : "No monthly amount set"}
-                        {l.includeInNetBalance ? " · in Net Balance" : ""}
+                        {l.direction === "given" ? "Given" : "Taken"}{l.includeInNetBalance ? " · in Net Balance" : ""}{l.note ? ` · ${l.note}` : ""}
                       </div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 13.5 }}>
+                        <Money amount={l.principalAmount} size={13} />
+                      </div>
+                      {l.monthlyRepayment > 0 && (
+                        <div style={{ fontSize: 10.5, opacity: 0.55, marginTop: 1 }}>
+                          <Money amount={l.monthlyRepayment} size={10} />/mo
+                        </div>
+                      )}
                     </div>
                     <button className="row-icon-hover" style={styles.rowIconBtn} onClick={() => setLoanFormOpen(l)} title="Edit">
                       <Pencil size={13} />
@@ -2740,7 +2763,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           {(paymentMethods.length > 0 || (paymentBreakdown.length > 1 || (paymentBreakdown.length === 1 && paymentBreakdown[0].name !== "Not specified"))) && (
             <div style={{ ...styles.card, padding: "14px 18px" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 12.5, opacity: 0.6 }}>By payment method this month</span>
+                <span style={{ fontSize: 14.5, opacity: 1, color: T.ink, fontWeight: 700 }}>By payment method this month</span>
                 <button className="row-icon-hover" style={styles.rowIconBtn} onClick={() => setPaymentSetupOpen(true)} title="Edit payment methods">
                   <Pencil size={13} />
                 </button>
@@ -2927,6 +2950,13 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                   </div>
                   <div style={styles.rowAmount}><Money amount={Number(x.amount)} size={13.5} color={T.sage} /></div>
                   <button
+                    className="row-icon-hover" style={styles.rowIconBtn}
+                    onClick={() => setEditingIncome(x)}
+                    title="Edit"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
                     className="row-icon-hover" style={{ ...styles.rowIconBtn, color: T.brick }}
                     onClick={() => setConfirmDialog({ title: "Delete this income entry?", message: `${x.source} · ${fmtMoneyLocal(x.amount)}`, onConfirm: () => handleDeleteIncome(x.id) })}
                   >
@@ -2985,6 +3015,14 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           entry={editingSavings}
           onCancel={() => setEditingSavings(null)}
           onSave={handleUpdateSavings}
+        />
+      )}
+
+      {editingIncome && (
+        <EditIncomeModal
+          entry={editingIncome}
+          onCancel={() => setEditingIncome(null)}
+          onSave={handleUpdateIncome}
         />
       )}
 
@@ -3596,6 +3634,77 @@ function EditSavingsModal({ entry, onCancel, onSave }) {
   );
 }
 
+/* ================================================================
+   EDIT INCOME ENTRY
+================================================================= */
+function EditIncomeModal({ entry, onCancel, onSave }) {
+  const [amount, setAmount] = useState(String(entry.amount));
+  const [source, setSource] = useState(entry.source);
+  const [date, setDate] = useState(entry.date);
+  const [note, setNote] = useState(entry.note || "");
+  const [err, setErr] = useState("");
+
+  const submit = (e) => {
+    e?.preventDefault?.();
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) return setErr("Enter an amount greater than zero.");
+    if (!source.trim()) return setErr("Name the income source.");
+    if (!date) return setErr("Pick a date.");
+    onSave({ amount: amt, source: source.trim(), date, note: note.trim() });
+  };
+
+  return (
+    <div style={styles.modalOverlay} onClick={onCancel}>
+      <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: 0 }}>Edit income</h2>
+          <button type="button" style={styles.iconGhostBtnDark} onClick={onCancel}><X size={18} /></button>
+        </div>
+
+        <label style={styles.label}>Amount</label>
+        <input
+          autoFocus
+          type="number"
+          inputMode="decimal"
+          style={styles.textInput}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.00"
+        />
+
+        <label style={styles.label}>Source</label>
+        <input
+          style={styles.textInput}
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          maxLength={24}
+        />
+
+        <label style={styles.label}>Date</label>
+        <input type="date" style={styles.textInput} value={date} onChange={(e) => setDate(e.target.value)} />
+
+        <label style={styles.label}>Note (optional)</label>
+        <input
+          style={styles.textInput}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit(e)}
+          maxLength={60}
+        />
+
+        {err && <p style={styles.errorText}>{err}</p>}
+
+        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+          <button type="button" style={styles.textBtn} onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} onClick={submit}>
+            <Check size={16} /> Save changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SavingsForm({ mode, currentBalance, onCancel, onSave }) {
   const isWithdraw = mode === "withdraw";
   const [amount, setAmount] = useState("");
@@ -3874,6 +3983,8 @@ function LoanForm({ initial, onCancel, onSave }) {
   const submit = async (e) => {
     e?.preventDefault?.();
     setError("");
+    const principal = parseFloat(principalAmount);
+    if (!principal || principal <= 0) return setError("Enter the loan's principal amount.");
     if (includeInNetBalance && !monthlyRepayment) {
       return setError("Enter a monthly repayment amount, or turn off \"include in Net Balance.\"");
     }
@@ -3883,7 +3994,7 @@ function LoanForm({ initial, onCancel, onSave }) {
         loanType,
         direction,
         personOrLender: personOrLender.trim(),
-        principalAmount: principalAmount ? parseFloat(principalAmount) : null,
+        principalAmount: principal,
         monthlyRepayment: monthlyRepayment ? parseFloat(monthlyRepayment) : null,
         includeInNetBalance,
         note: note.trim(),
@@ -3935,7 +4046,7 @@ function LoanForm({ initial, onCancel, onSave }) {
           maxLength={40}
         />
 
-        <label style={styles.label}>Principal amount (optional)</label>
+        <label style={styles.label}>Principal amount</label>
         <input
           type="number"
           inputMode="decimal"

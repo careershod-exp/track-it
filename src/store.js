@@ -739,3 +739,14 @@ export async function deleteLoan(loanId) {
   const { error } = await supabase.from("loans").delete().eq("id", loanId);
   if (error) throw error;
 }
+
+/* ---------------------------------------------------------------
+   Editing an income entry
+------------------------------------------------------------------ */
+export async function updateIncomeRemote(incomeId, patch) {
+  const { error } = await supabase
+    .from("income")
+    .update({ date: patch.date, source: patch.source, note: patch.note || null, amount: patch.amount })
+    .eq("id", incomeId);
+  if (error) throw error;
+}
