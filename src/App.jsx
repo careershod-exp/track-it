@@ -1237,7 +1237,7 @@ function MfaChallengeScreen({ onVerified, onCancel }) {
           <button type="button" className="btn-lift" style={styles.primaryBtn} disabled={busy} onClick={handleVerify}>
             {busy ? "Verifying…" : "Verify"}
           </button>
-          <button type="button" style={styles.textBtn} onClick={onCancel}>
+          <button type="button" style={{ ...styles.textBtn, width: "auto", flexShrink: 0, marginTop: 0 }} onClick={onCancel}>
             ← sign in with a different account
           </button>
         </div>
@@ -3792,8 +3792,8 @@ function IncomeForm({ onCancel, onSave }) {
         {err && <p style={styles.errorText}>{err}</p>}
 
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          <button type="button" style={styles.textBtn} onClick={onCancel}>Cancel</button>
-          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} onClick={submit}>
+          <button type="button" style={{ ...styles.textBtn, width: "auto", flexShrink: 0, marginTop: 0 }} onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, marginTop: 0, minWidth: 120 }} onClick={submit}>
             <Check size={16} /> Add to ledger
           </button>
         </div>
@@ -3864,8 +3864,8 @@ function EditSavingsModal({ entry, onCancel, onSave }) {
         {err && <p style={styles.errorText}>{err}</p>}
 
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          <button type="button" style={styles.textBtn} onClick={onCancel}>Cancel</button>
-          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} onClick={submit}>
+          <button type="button" style={{ ...styles.textBtn, width: "auto", flexShrink: 0, marginTop: 0 }} onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, marginTop: 0, minWidth: 120 }} onClick={submit}>
             <Check size={16} /> Save changes
           </button>
         </div>
@@ -3935,8 +3935,8 @@ function EditIncomeModal({ entry, onCancel, onSave }) {
         {err && <p style={styles.errorText}>{err}</p>}
 
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          <button type="button" style={styles.textBtn} onClick={onCancel}>Cancel</button>
-          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} onClick={submit}>
+          <button type="button" style={{ ...styles.textBtn, width: "auto", flexShrink: 0, marginTop: 0 }} onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, marginTop: 0, minWidth: 120 }} onClick={submit}>
             <Check size={16} /> Save changes
           </button>
         </div>
@@ -4003,8 +4003,8 @@ function SavingsForm({ mode, currentBalance, onCancel, onSave }) {
         {err && <p style={styles.errorText}>{err}</p>}
 
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          <button type="button" style={styles.textBtn} onClick={onCancel}>Cancel</button>
-          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} onClick={submit}>
+          <button type="button" style={{ ...styles.textBtn, width: "auto", flexShrink: 0, marginTop: 0 }} onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, marginTop: 0, minWidth: 120 }} onClick={submit}>
             <Check size={16} /> {isWithdraw ? "Take out" : "Add to ledger"}
           </button>
         </div>
@@ -4133,7 +4133,7 @@ function CardRemindersModal({ paymentMethods, reminders, onAdd, onDelete, onClos
             {error && <p style={styles.errorText}>{error}</p>}
             <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
               <button type="button" style={styles.textBtn} onClick={() => { setCreating(false); setError(""); }}>Cancel</button>
-              <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} disabled={busy} onClick={handleAdd}>
+              <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, marginTop: 0, minWidth: 120 }} disabled={busy} onClick={handleAdd}>
                 {busy ? "Adding…" : "Add"}
               </button>
             </div>
@@ -4256,8 +4256,8 @@ function UpdateLoanBalanceModal({ loan, currentBalance, onCancel, onSave }) {
         {error && <p style={styles.errorText}>{error}</p>}
 
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          <button type="button" style={styles.textBtn} onClick={onCancel}>Cancel</button>
-          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} disabled={busy} onClick={submit}>
+          <button type="button" style={{ ...styles.textBtn, width: "auto", flexShrink: 0, marginTop: 0 }} onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, marginTop: 0, minWidth: 120 }} disabled={busy} onClick={submit}>
             {busy ? "Saving…" : "Save"}
           </button>
         </div>
@@ -4291,6 +4291,10 @@ function LoanForm({ initial, onCancel, onSave }) {
     setError("");
     const principal = parseFloat(principalAmount);
     if (!principal || principal <= 0) return setError("Enter the loan's principal amount.");
+    const monthly = parseFloat(monthlyRepayment);
+    if (monthlyRepayment && monthly > principal) {
+      return setError("Monthly repayment can't be more than the principal amount.");
+    }
     if (includeInNetBalance && !monthlyRepayment) {
       return setError("Enter a monthly repayment amount, or turn off \"include in Net Balance.\"");
     }
@@ -4412,8 +4416,8 @@ function LoanForm({ initial, onCancel, onSave }) {
         {error && <p style={styles.errorText}>{error}</p>}
 
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          <button type="button" style={styles.textBtn} onClick={onCancel}>Cancel</button>
-          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} disabled={busy} onClick={submit}>
+          <button type="button" style={{ ...styles.textBtn, width: "auto", flexShrink: 0, marginTop: 0 }} onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, marginTop: 0, minWidth: 120 }} disabled={busy} onClick={submit}>
             {busy ? "Saving…" : isEditing ? "Save changes" : "Add loan"}
           </button>
         </div>
@@ -4566,7 +4570,7 @@ function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete
             {error && <p style={styles.errorText}>{error}</p>}
             <div style={{ display: "flex", gap: 10 }}>
               <button type="button" style={styles.textBtn} onClick={() => { setCreating(false); setError(""); }}>Cancel</button>
-              <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} disabled={busy} onClick={handleAdd}>
+              <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, marginTop: 0, minWidth: 120 }} disabled={busy} onClick={handleAdd}>
                 {busy ? "Adding…" : "Add"}
               </button>
             </div>
@@ -4785,7 +4789,7 @@ function CsvImportModal({ categories, onImport, onClose }) {
               <button type="button" style={styles.textBtn} onClick={() => { setRawRows(null); setHeaders([]); setError(""); }}>
                 ← choose a different file
               </button>
-              <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, marginTop: 0 }} disabled={busy || validCount === 0} onClick={handleImport}>
+              <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, marginTop: 0, minWidth: 120 }} disabled={busy || validCount === 0} onClick={handleImport}>
                 {busy ? "Importing…" : `Import ${validCount}`}
               </button>
             </div>
@@ -5163,7 +5167,7 @@ function TwoFactorSection() {
           {error && <p style={styles.errorText}>{error}</p>}
           <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
             <button type="button" style={styles.textBtn} onClick={cancelEnroll}>Cancel</button>
-            <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, marginTop: 0 }} disabled={busy} onClick={confirmEnroll}>
+            <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1, marginTop: 0, minWidth: 120 }} disabled={busy} onClick={confirmEnroll}>
               {busy ? "Confirming…" : "Confirm"}
             </button>
           </div>
@@ -5970,12 +5974,12 @@ const styles = {
   primaryBtn: {
     width: "100%", marginTop: 18, padding: "13px", borderRadius: 10, border: "none",
     background: T.ink, color: T.parchment, fontSize: 15, fontWeight: 600, cursor: "pointer",
-    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 8, whiteSpace: "nowrap",
   },
   secondaryBtn: {
     width: "100%", padding: "12px", borderRadius: 10, border: `1.5px dashed ${T.ink}55`,
     background: "transparent", color: T.ink, fontSize: 14, fontWeight: 600, cursor: "pointer",
-    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 8, whiteSpace: "nowrap",
   },
   secondaryBtnSmall: {
     padding: "0 14px", borderRadius: 10, border: `1px solid ${T.parchmentDim}`,
