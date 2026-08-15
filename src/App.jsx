@@ -3482,7 +3482,7 @@ function TapeStrip({ blocks }) {
               Nothing logged yet
             </span>
           ) : (
-            <div style={{ display: "flex", width: "max-content" }} className={shouldLoop ? "ticker-track" : ""}>
+            <div style={{ display: "flex", alignItems: "center", width: "max-content" }} className={shouldLoop ? "ticker-track" : ""}>
               {renderBlocks("a")}
               {/* Duplicate the track so the loop point is invisible — this is the standard
                   seamless-marquee trick: scroll exactly one copy's width, then reset. Only
