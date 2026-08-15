@@ -25,7 +25,7 @@ import {
   fetchRecurringIncome, createRecurringIncome, deleteRecurringIncome, markRecurringIncomeGenerated,
   fetchCardReminders, createCardReminder, deleteCardReminder, markCardReminderNotified,
   fetchNotifications, insertNotification, markNotificationsRead,
-  updateSavingsRemote, fetchLoans, createLoan, updateLoan, deleteLoan, updateIncomeRemote,
+  updateSavingsRemote, fetchLoans, createLoan, updateLoan, deleteLoan, updateLoanBalance, updateIncomeRemote,
 } from "./store";
 
 /* ---------------------------------------------------------------
@@ -157,24 +157,44 @@ function isStorageFullError(err) {
 // Works out a loan's actual standing as of a given month — how much of the
 // principal has been paid down by that point, how much (if anything) is
 // still owed, and whether that month's repayment should count toward Net
+// Works out a loan's actual standing as of a given month — how much of the
+// principal has been paid down by that point, how much (if anything) is
+// still owed, and whether that month's repayment should count toward Net
 // Balance at all. Without this, a loan's monthly repayment would keep
 // reducing Net Balance forever, long after it's genuinely been paid off.
+//
+// If the loan has a manually-set balance correction (from a missed
+// payment, paying extra, or paying it off early), that becomes the new
+// starting point for every month from the correction's date onward —
+// months before that date still use the original schedule, so past
+// history stays accurate even after a correction is made.
 function loanStatusForMonth(loan, monthCursor) {
-  const principal = Number(loan.principalAmount || 0);
   const monthly = Number(loan.monthlyRepayment || 0);
-  if (!principal || !monthly || !loan.startDate) {
-    return { remainingBalance: principal, thisMonthAmount: 0, isPaidOff: false };
-  }
-  const start = new Date(loan.startDate + "T00:00:00");
-  const startMonthIndex = start.getFullYear() * 12 + start.getMonth();
+  const hasOverride = loan.balanceOverrideAmount != null && loan.balanceOverrideDate;
+  const overrideMonthIndex = hasOverride
+    ? new Date(loan.balanceOverrideDate + "T00:00:00").getFullYear() * 12 + new Date(loan.balanceOverrideDate + "T00:00:00").getMonth()
+    : null;
   const viewedMonthIndex = monthCursor.getFullYear() * 12 + monthCursor.getMonth();
+  const useOverride = hasOverride && viewedMonthIndex >= overrideMonthIndex;
+
+  const basePrincipal = useOverride ? Number(loan.balanceOverrideAmount) : Number(loan.principalAmount || 0);
+  const baseStartDate = useOverride ? loan.balanceOverrideDate : loan.startDate;
+
+  if (basePrincipal <= 0) {
+    return { remainingBalance: 0, thisMonthAmount: 0, isPaidOff: true };
+  }
+  if (!monthly || !baseStartDate) {
+    return { remainingBalance: basePrincipal, thisMonthAmount: 0, isPaidOff: false };
+  }
+  const start = new Date(baseStartDate + "T00:00:00");
+  const startMonthIndex = start.getFullYear() * 12 + start.getMonth();
   // How many monthly payments have fallen due by (and including) the viewed
   // month — 0 if the loan hasn't started yet as of that month.
   const paymentsDueSoFar = Math.max(0, viewedMonthIndex - startMonthIndex + 1);
   const paymentsDueBeforeThisMonth = Math.max(0, paymentsDueSoFar - 1);
 
-  const remainingBeforeThisMonth = Math.max(0, principal - paymentsDueBeforeThisMonth * monthly);
-  const remainingBalance = Math.max(0, principal - paymentsDueSoFar * monthly);
+  const remainingBeforeThisMonth = Math.max(0, basePrincipal - paymentsDueBeforeThisMonth * monthly);
+  const remainingBalance = Math.max(0, basePrincipal - paymentsDueSoFar * monthly);
   // The final payment is often smaller than a full monthly amount — this
   // caps it so the loan can't "overpay" past what's actually still owed.
   const thisMonthAmount = viewedMonthIndex < startMonthIndex ? 0 : Math.min(monthly, remainingBeforeThisMonth);
@@ -1255,6 +1275,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [editingIncome, setEditingIncome] = useState(null); // the income entry being edited, or null
   const [loans, setLoans] = useState([]);
   const [loanFormOpen, setLoanFormOpen] = useState(false); // false | "add" | a loan object being edited
+  const [updatingLoanBalance, setUpdatingLoanBalance] = useState(null); // the loan whose balance is being corrected, or null
   const [monthEndPromptOpen, setMonthEndPromptOpen] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null); // { title, message?, confirmLabel?, onConfirm } | null
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -1938,6 +1959,14 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     }
   };
 
+  const handleUpdateLoanBalance = async (amount, date) => {
+    if (!isOnline) throw new Error("This needs an internet connection.");
+    const id = updatingLoanBalance.id;
+    if (!profile.isDemo) await updateLoanBalance(id, amount, date);
+    setLoans((cur) => cur.map((l) => (l.id === id ? { ...l, balanceOverrideAmount: amount, balanceOverrideDate: date } : l)));
+    setUpdatingLoanBalance(null);
+  };
+
   const markMonthEndDecided = () => {
     const now = new Date();
     const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -2247,6 +2276,118 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     return [...(expenses || [])].sort((a, b) => b.createdAt - a.createdAt).slice(0, 12);
   }, [expenses]);
 
+  // Last calendar month's total, for the "compared to last month" ticker
+  // segment — computed from the same all-time expenses list monthExpenses
+  // draws from, just shifted back one month instead of using monthCursor.
+  const lastMonthTotal = useMemo(() => {
+    const prev = new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1);
+    const prevKey = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+    return (expenses || [])
+      .filter((x) => x.date && x.date.slice(0, 7) === prevKey)
+      .reduce((s, x) => s + Number(x.amount), 0);
+  }, [expenses, monthCursor]);
+
+  // Everything the ticker could show, grouped into content "blocks" — only
+  // blocks with real content are included, so an empty or irrelevant
+  // category (no budgets set, no upcoming card payments, etc.) never shows
+  // up as a gap or forces the ticker to invent something to say.
+  const tickerBlocks = useMemo(() => {
+    const blocks = [];
+
+    if (recentTape.length > 0) {
+      blocks.push({
+        id: "recent",
+        items: recentTape.map((e) => ({
+          id: e.id,
+          node: (
+            <span style={{ animation: e.id === justAddedId ? "printIn 0.5s ease-out" : "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span style={{ ...styles.tapeDot, background: catColor(categoryColorIndex[e.category] ?? 0) }} />
+              {e.category} <Money amount={Number(e.amount)} size={12} color={T.parchment} />
+            </span>
+          ),
+        })),
+      });
+    }
+
+    const overBudget = categoryOverview.filter((c) => c.budget && c.value > c.budget).slice(0, 3);
+    if (overBudget.length > 0) {
+      blocks.push({
+        id: "budget",
+        items: overBudget.map((c) => ({
+          id: `budget-${c.name}`,
+          node: <span style={{ color: "#E89AA3" }}>⚠ {c.name} is over budget</span>,
+        })),
+      });
+    }
+
+    const today = new Date();
+    const upcomingCards = cardReminders
+      .map((r) => {
+        const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), r.dueDay);
+        let daysUntil = Math.round((dueThisMonth - today) / 86400000);
+        if (daysUntil < 0) daysUntil += new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+        return { ...r, daysUntil };
+      })
+      .filter((r) => r.daysUntil >= 0 && r.daysUntil <= 5)
+      .sort((a, b) => a.daysUntil - b.daysUntil);
+    if (upcomingCards.length > 0) {
+      blocks.push({
+        id: "cards",
+        items: upcomingCards.map((r) => ({
+          id: `card-${r.id}`,
+          node: (
+            <span>
+              <CreditCard size={11} style={{ verticalAlign: -1, marginRight: 4, opacity: 0.7 }} />
+              {r.cardName} due {r.daysUntil === 0 ? "today" : r.daysUntil === 1 ? "tomorrow" : `in ${r.daysUntil} days`}
+            </span>
+          ),
+        })),
+      });
+    }
+
+    if (monthTotal > 0) {
+      const daysInMonth = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0).getDate();
+      const isCurrentMonth = monthCursor.getFullYear() === today.getFullYear() && monthCursor.getMonth() === today.getMonth();
+      const daysElapsed = isCurrentMonth ? today.getDate() : daysInMonth;
+      const daysLeft = isCurrentMonth ? daysInMonth - daysElapsed : 0;
+      const dailyAvg = monthTotal / Math.max(1, daysElapsed);
+      blocks.push({
+        id: "pace",
+        items: [{
+          id: "pace-1",
+          node: isCurrentMonth
+            ? <span>{daysLeft} day{daysLeft === 1 ? "" : "s"} left · <Money amount={dailyAvg} size={12} color={T.parchment} />/day average</span>
+            : <span><Money amount={dailyAvg} size={12} color={T.parchment} />/day average that month</span>,
+        }],
+      });
+    }
+
+    if (monthTotal > 0 && lastMonthTotal > 0) {
+      const pct = Math.round(((monthTotal - lastMonthTotal) / lastMonthTotal) * 100);
+      if (Math.abs(pct) >= 1) {
+        blocks.push({
+          id: "comparison",
+          items: [{
+            id: "comparison-1",
+            node: <span>Spending is {Math.abs(pct)}% {pct > 0 ? "higher" : "lower"} than last month</span>,
+          }],
+        });
+      }
+    }
+
+    if (savingsCumulativeTotal > 0) {
+      blocks.push({
+        id: "savings",
+        items: [{
+          id: "savings-1",
+          node: <span><PiggyBank size={11} style={{ verticalAlign: -1, marginRight: 4, opacity: 0.7 }} />Total saved: <Money amount={savingsCumulativeTotal} size={12} color={T.parchment} /></span>,
+        }],
+      });
+    }
+
+    return blocks;
+  }, [recentTape, justAddedId, categoryColorIndex, categoryOverview, cardReminders, monthTotal, monthCursor, lastMonthTotal, savingsCumulativeTotal]);
+
   const toggleFilter = (name) => {
     setActiveFilters((prev) => {
       const next = new Set(prev);
@@ -2483,7 +2624,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         )}
       </div>
 
-      <TapeStrip entries={recentTape} categoryColorIndex={categoryColorIndex} justAddedId={justAddedId} />
+      <TapeStrip blocks={tickerBlocks} />
 
       {!isOnline && !profile.isDemo && (
         <div style={{ ...styles.errorBanner, background: `${T.ink}`, border: "none" }}>
@@ -2810,6 +2951,15 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                         </div>
                       )}
                     </div>
+                    {l.monthlyRepayment > 0 && !status.isPaidOff && (
+                      <button
+                        className="row-icon-hover" style={styles.rowIconBtn}
+                        onClick={() => setUpdatingLoanBalance(l)}
+                        title="Update balance"
+                      >
+                        <Check size={13} />
+                      </button>
+                    )}
                     <button className="row-icon-hover" style={styles.rowIconBtn} onClick={() => setLoanFormOpen(l)} title="Edit">
                       <Pencil size={13} />
                     </button>
@@ -3103,6 +3253,15 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         />
       )}
 
+      {updatingLoanBalance && (
+        <UpdateLoanBalanceModal
+          loan={updatingLoanBalance}
+          currentBalance={loanStatuses[updatingLoanBalance.id]?.remainingBalance ?? updatingLoanBalance.principalAmount}
+          onCancel={() => setUpdatingLoanBalance(null)}
+          onSave={handleUpdateLoanBalance}
+        />
+      )}
+
       {recurringOpen && (
         <RecurringModal
           categories={categories}
@@ -3257,18 +3416,24 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 /* ================================================================
    TAPE STRIP (signature element)
 ================================================================= */
-function TapeStrip({ entries, categoryColorIndex, justAddedId }) {
-  const renderItems = (keyPrefix) =>
-    entries.map((e) => (
-      <span
-        key={`${keyPrefix}-${e.id}`}
-        style={{
-          ...styles.tapeItem,
-          animation: keyPrefix === "a" && e.id === justAddedId ? "printIn 0.5s ease-out" : "none",
-        }}
-      >
-        <span style={{ ...styles.tapeDot, background: catColor(categoryColorIndex[e.category] ?? 0) }} />
-        {e.category} <Money amount={Number(e.amount)} size={12} color={T.parchment} />
+function TapeStrip({ blocks }) {
+  const totalItems = blocks.reduce((n, b) => n + b.items.length, 0);
+  // With only a couple of items, duplicating the track for a seamless loop
+  // just makes it look like there are more distinct entries than there
+  // really are (2 real items reading as 4). Only loop once there's enough
+  // content that a genuine scroll — not a flicker between two copies of
+  // the same couple of things — actually makes sense.
+  const shouldLoop = totalItems >= 4;
+
+  const renderBlocks = (keyPrefix) =>
+    blocks.map((block, bi) => (
+      <span key={`${keyPrefix}-${block.id}`} style={{ display: "flex", alignItems: "center" }}>
+        {bi > 0 && <span style={styles.tapeSeparator} />}
+        <span style={{ display: "flex", gap: 22, paddingRight: 22 }}>
+          {block.items.map((item) => (
+            <span key={`${keyPrefix}-${item.id}`} style={styles.tapeItem}>{item.node}</span>
+          ))}
+        </span>
       </span>
     ));
 
@@ -3277,19 +3442,25 @@ function TapeStrip({ entries, categoryColorIndex, justAddedId }) {
       <div style={styles.tapePerfTop} />
       <div style={styles.tapeRow}>
         <span style={styles.tapeLabel}>
-          <span style={styles.tapeLiveDot} /> Recent
+          <span style={styles.tapeLiveDot} /> Live
         </span>
         <div style={styles.tapeScroll}>
-          {entries.length === 0 ? (
+          {totalItems === 0 ? (
             <span style={{ opacity: 0.5, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13 }}>
               Nothing logged yet
             </span>
           ) : (
-            <div style={{ display: "flex", width: "max-content" }} className="ticker-track">
-              <div style={{ display: "flex", gap: 22, paddingRight: 22 }}>{renderItems("a")}</div>
+            <div style={{ display: "flex", width: "max-content" }} className={shouldLoop ? "ticker-track" : ""}>
+              {renderBlocks("a")}
               {/* Duplicate the track so the loop point is invisible — this is the standard
-                  seamless-marquee trick: scroll exactly one copy's width, then reset. */}
-              <div style={{ display: "flex", gap: 22, paddingRight: 22 }} aria-hidden="true">{renderItems("b")}</div>
+                  seamless-marquee trick: scroll exactly one copy's width, then reset. Only
+                  done when there's enough content for it to look intentional. */}
+              {shouldLoop && (
+                <span aria-hidden="true" style={{ display: "flex", alignItems: "center" }}>
+                  <span style={styles.tapeSeparator} />
+                  {renderBlocks("b")}
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -4030,6 +4201,71 @@ function NotificationsModal({ notifications, onManageReminders, onClose }) {
 /* ================================================================
    LOAN FORM (given or taken)
 ================================================================= */
+/* ================================================================
+   CORRECT A LOAN'S BALANCE (missed payment, extra payment, early payoff)
+================================================================= */
+function UpdateLoanBalanceModal({ loan, currentBalance, onCancel, onSave }) {
+  const [amount, setAmount] = useState(String(currentBalance));
+  const [date, setDate] = useState(todayISO());
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e?.preventDefault?.();
+    setError("");
+    const amt = parseFloat(amount);
+    if (amt === "" || isNaN(amt) || amt < 0) return setError("Enter a valid amount — 0 if it's fully paid off.");
+    setBusy(true);
+    try {
+      await onSave(amt, date);
+    } catch (err) {
+      setError(err?.message || "Couldn't save that. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={styles.modalOverlay} onClick={onCancel}>
+      <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, margin: 0 }}>Update balance</h2>
+          <button type="button" style={styles.iconGhostBtnDark} onClick={onCancel}><X size={18} /></button>
+        </div>
+        <p style={{ fontSize: 12.5, opacity: 0.6, marginTop: 4 }}>
+          {loan.loanType}{loan.personOrLender ? ` · ${loan.personOrLender}` : ""} — the schedule assumed{" "}
+          <Money amount={currentBalance} size={12} /> left as of today. If a payment was missed, paid extra, or
+          this is fully paid off, correct it here — everything before today stays as it was.
+        </p>
+
+        <label style={styles.label}>What's actually still owed?</label>
+        <input
+          autoFocus
+          type="number"
+          inputMode="decimal"
+          style={styles.textInput}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.00"
+        />
+        <p style={{ fontSize: 11.5, opacity: 0.55, marginTop: 4 }}>Enter 0 if it's fully paid off.</p>
+
+        <label style={styles.label}>As of</label>
+        <input type="date" style={styles.textInput} value={date} onChange={(e) => setDate(e.target.value)} />
+
+        {error && <p style={styles.errorText}>{error}</p>}
+
+        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+          <button type="button" style={styles.textBtn} onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-lift" style={{ ...styles.primaryBtn, flex: 1 }} disabled={busy} onClick={submit}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LoanForm({ initial, onCancel, onSave }) {
   const isEditing = !!initial && initial !== "add";
   const [loanType, setLoanType] = useState(isEditing ? initial.loanType : LOAN_TYPES[0]);
@@ -5801,6 +6037,7 @@ const styles = {
   },
   tapeItem: { display: "inline-flex", alignItems: "center", gap: 7, opacity: 0.9, whiteSpace: "nowrap" },
   tapeDot: { width: 6, height: 6, borderRadius: "50%", display: "inline-block" },
+  tapeSeparator: { width: 2, alignSelf: "stretch", background: T.brick, opacity: 0.7, borderRadius: 1, marginRight: 22, flexShrink: 0 },
 
   errorBanner: {
     background: `${T.brick}22`, border: `1px solid ${T.brick}55`, color: T.parchment,
