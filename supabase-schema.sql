@@ -427,6 +427,7 @@ create table if not exists loans (
   person_or_lender text,
   principal_amount numeric,
   monthly_repayment numeric,
+  start_date date not null default current_date,
   include_in_net_balance boolean not null default false,
   note text,
   created_at timestamptz not null default now()

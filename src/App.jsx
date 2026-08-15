@@ -144,6 +144,44 @@ function fmtDate(isoDate) {
 // uses the same dd-mm-yyyy format as everywhere else; the time portion
 // stays in the browser's locale format, since 12h vs 24h time isn't the
 // kind of ambiguity that day/month order is.
+// Supabase Storage doesn't return a single consistent error shape for "the
+// bucket/project is out of storage space" — it can come through with wording
+// like "quota", "limit", or "exceeded the maximum" depending on which layer
+// caught it. Checking for these keywords lets us tell someone the real reason
+// their receipt photo failed, rather than a generic "something went wrong."
+function isStorageFullError(err) {
+  const msg = (err?.message || err?.error_description || String(err || "")).toLowerCase();
+  return msg.includes("quota") || msg.includes("exceeded the maximum") || msg.includes("insufficient storage") || msg.includes("storage limit");
+}
+
+// Works out a loan's actual standing as of a given month — how much of the
+// principal has been paid down by that point, how much (if anything) is
+// still owed, and whether that month's repayment should count toward Net
+// Balance at all. Without this, a loan's monthly repayment would keep
+// reducing Net Balance forever, long after it's genuinely been paid off.
+function loanStatusForMonth(loan, monthCursor) {
+  const principal = Number(loan.principalAmount || 0);
+  const monthly = Number(loan.monthlyRepayment || 0);
+  if (!principal || !monthly || !loan.startDate) {
+    return { remainingBalance: principal, thisMonthAmount: 0, isPaidOff: false };
+  }
+  const start = new Date(loan.startDate + "T00:00:00");
+  const startMonthIndex = start.getFullYear() * 12 + start.getMonth();
+  const viewedMonthIndex = monthCursor.getFullYear() * 12 + monthCursor.getMonth();
+  // How many monthly payments have fallen due by (and including) the viewed
+  // month — 0 if the loan hasn't started yet as of that month.
+  const paymentsDueSoFar = Math.max(0, viewedMonthIndex - startMonthIndex + 1);
+  const paymentsDueBeforeThisMonth = Math.max(0, paymentsDueSoFar - 1);
+
+  const remainingBeforeThisMonth = Math.max(0, principal - paymentsDueBeforeThisMonth * monthly);
+  const remainingBalance = Math.max(0, principal - paymentsDueSoFar * monthly);
+  // The final payment is often smaller than a full monthly amount — this
+  // caps it so the loan can't "overpay" past what's actually still owed.
+  const thisMonthAmount = viewedMonthIndex < startMonthIndex ? 0 : Math.min(monthly, remainingBeforeThisMonth);
+
+  return { remainingBalance, thisMonthAmount, isPaidOff: remainingBalance <= 0 && paymentsDueSoFar > 0 };
+}
+
 function fmtDateTime(ms) {
   const d = new Date(ms);
   const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -1663,7 +1701,15 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           receiptPath = "";
         } else if (receiptFile && !profile.isDemo) {
           if (editingExpense.receiptPath) { try { await deleteReceipt(editingExpense.receiptPath); } catch { /* best effort */ } }
-          receiptPath = await uploadReceipt(uid, editingExpense.id, receiptFile);
+          try {
+            receiptPath = await uploadReceipt(uid, editingExpense.id, receiptFile);
+          } catch (err) {
+            setError(
+              isStorageFullError(err)
+                ? "There's no storage space left for the receipt photo. The rest of your changes were saved."
+                : "The receipt photo didn't upload. The rest of your changes were saved."
+            );
+          }
         }
         const updated = { ...editingExpense, ...rest, receiptPath };
         finalList = expenses.map((x) => (x.id === editingExpense.id ? updated : x));
@@ -1686,8 +1732,12 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
               const receiptPath = await uploadReceipt(uid, saved.id, receiptFile);
               await updateExpenseRemote(saved.id, { ...rest, receiptPath });
               saved = { ...saved, receiptPath };
-            } catch {
-              setError("Saved, but the receipt photo didn't upload.");
+            } catch (err) {
+              setError(
+                isStorageFullError(err)
+                  ? "Expense saved, but there's no storage space left for the receipt photo. Contact support to free up space."
+                  : "Saved, but the receipt photo didn't upload."
+              );
             }
           }
           finalList = finalList.map((x) => (x.id === tempId ? saved : x));
@@ -2106,21 +2156,32 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   // sum of everything ever logged, not scoped to any one month.
   const savingsCumulativeTotal = useMemo(() => savings.reduce((s, x) => s + Number(x.amount), 0), [savings]);
 
-  const loansTakenTotal = useMemo(() => loans.filter((l) => l.direction === "taken").reduce((s, l) => s + Number(l.principalAmount || 0), 0), [loans]);
-  const loansGivenTotal = useMemo(() => loans.filter((l) => l.direction === "given").reduce((s, l) => s + Number(l.principalAmount || 0), 0), [loans]);
+  // "Given"/"Taken" totals show what's actually still outstanding as of the
+  // month being viewed, not the original amount borrowed — a loan that's
+  // been paid off no longer counts toward either total.
+  const loanStatuses = useMemo(() => {
+    const map = {};
+    loans.forEach((l) => { map[l.id] = loanStatusForMonth(l, monthCursor); });
+    return map;
+  }, [loans, monthCursor]);
+
+  const loansTakenTotal = useMemo(() => loans.filter((l) => l.direction === "taken").reduce((s, l) => s + (loanStatuses[l.id]?.remainingBalance ?? Number(l.principalAmount || 0)), 0), [loans, loanStatuses]);
+  const loansGivenTotal = useMemo(() => loans.filter((l) => l.direction === "given").reduce((s, l) => s + (loanStatuses[l.id]?.remainingBalance ?? Number(l.principalAmount || 0)), 0), [loans, loanStatuses]);
 
   // Any loan with "include in Net Balance" turned on contributes its
-  // monthly repayment to every month's Net Balance, not just a single
-  // dated entry — a mortgage or car payment is genuinely ongoing, so this
-  // is applied uniformly rather than needing a recurring-generation step.
-  // A loan you took repaying reduces available cash; a loan you gave being
-  // repaid to you adds to it — the sign flips based on direction.
+  // repayment to the viewed month's Net Balance — but only for as long as
+  // there's actually still a balance owed. Once the running total repaid
+  // reaches the principal, it stops counting automatically — no manual
+  // "mark as paid" step needed. A loan you took repaying reduces available
+  // cash; a loan you gave being repaid to you adds to it.
   const monthLoanImpact = useMemo(() => {
     return loans.reduce((sum, l) => {
-      if (!l.includeInNetBalance || !l.monthlyRepayment) return sum;
-      return sum + (l.direction === "taken" ? -Number(l.monthlyRepayment) : Number(l.monthlyRepayment));
+      if (!l.includeInNetBalance) return sum;
+      const status = loanStatuses[l.id];
+      if (!status || status.thisMonthAmount <= 0) return sum;
+      return sum + (l.direction === "taken" ? -status.thisMonthAmount : status.thisMonthAmount);
     }, 0);
-  }, [loans]);
+  }, [loans, loanStatuses]);
 
   // Money moved to savings counts against available cash the same way an
   // expense does — it's tracked in its own area so it's visible separately,
@@ -2718,27 +2779,34 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
             </p>
             {loans.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10, maxHeight: 200, overflowY: "auto" }}>
-                {loans.map((l) => (
-                  <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {loans.map((l) => {
+                  const status = loanStatuses[l.id] || { remainingBalance: l.principalAmount, isPaidOff: false };
+                  return (
+                  <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 8, opacity: status.isPaidOff ? 0.55 : 1 }}>
                     <span style={{
                       ...styles.legendDot, flexShrink: 0,
-                      background: l.direction === "given" ? T.sage : T.brick,
+                      background: status.isPaidOff ? T.parchmentDim : (l.direction === "given" ? T.sage : T.brick),
                     }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600 }}>
                         {l.loanType}{l.personOrLender ? ` · ${l.personOrLender}` : ""}
                       </div>
-                      <div style={{ fontSize: 11.5, opacity: 0.6 }}>
-                        {l.direction === "given" ? "Given" : "Taken"}{l.includeInNetBalance ? " · in Net Balance" : ""}{l.note ? ` · ${l.note}` : ""}
+                      <div style={{ fontSize: 11.5, opacity: 0.6, marginTop: 1 }}>
+                        {status.isPaidOff ? (
+                          <span style={{ color: T.sage, fontWeight: 700 }}>✓ Paid off</span>
+                        ) : (
+                          <>{l.direction === "given" ? "Given" : "Taken"}{l.includeInNetBalance ? " · in Net Balance" : ""}</>
+                        )}
+                        {l.note ? ` · ${l.note}` : ""}
                       </div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flexShrink: 0 }}>
-                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 13.5 }}>
-                        <Money amount={l.principalAmount} size={13} />
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flexShrink: 0, minWidth: 70 }}>
+                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 13.5, textAlign: "right", width: "100%" }}>
+                        <Money amount={status.isPaidOff ? 0 : status.remainingBalance} size={13} />
                       </div>
-                      {l.monthlyRepayment > 0 && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 10.5, opacity: 0.55, marginTop: 2 }}>
-                          <Money amount={l.monthlyRepayment} size={10} /><span>/mo</span>
+                      {!status.isPaidOff && l.monthlyRepayment > 0 && (
+                        <div style={{ fontSize: 10.5, opacity: 0.55, marginTop: 2, textAlign: "right", width: "100%" }}>
+                          <Money amount={l.monthlyRepayment} size={10} />/mo
                         </div>
                       )}
                     </div>
@@ -2752,7 +2820,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                       <X size={13} />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
             <button type="button" style={{ ...styles.secondaryBtnSmall, width: "100%", justifyContent: "center" }} onClick={() => setLoanFormOpen("add")}>
@@ -3968,6 +4037,7 @@ function LoanForm({ initial, onCancel, onSave }) {
   const [personOrLender, setPersonOrLender] = useState(isEditing ? initial.personOrLender : "");
   const [principalAmount, setPrincipalAmount] = useState(isEditing && initial.principalAmount ? String(initial.principalAmount) : "");
   const [monthlyRepayment, setMonthlyRepayment] = useState(isEditing && initial.monthlyRepayment ? String(initial.monthlyRepayment) : "");
+  const [startDate, setStartDate] = useState(isEditing && initial.startDate ? initial.startDate : todayISO());
   const [includeInNetBalance, setIncludeInNetBalance] = useState(isEditing ? initial.includeInNetBalance : false);
   const [note, setNote] = useState(isEditing ? initial.note : "");
   const [error, setError] = useState("");
@@ -3996,6 +4066,7 @@ function LoanForm({ initial, onCancel, onSave }) {
         personOrLender: personOrLender.trim(),
         principalAmount: principal,
         monthlyRepayment: monthlyRepayment ? parseFloat(monthlyRepayment) : null,
+        startDate,
         includeInNetBalance,
         note: note.trim(),
       });
@@ -4065,6 +4136,17 @@ function LoanForm({ initial, onCancel, onSave }) {
           onChange={(e) => setMonthlyRepayment(e.target.value)}
           placeholder="0.00"
         />
+
+        {monthlyRepayment && (
+          <>
+            <label style={styles.label}>Repayment start date</label>
+            <input type="date" style={styles.textInput} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            <p style={{ fontSize: 11.5, opacity: 0.55, marginTop: 4 }}>
+              Used to work out how much is still owed and when this loan is fully paid off — once the running
+              total repaid reaches the principal, it stops counting further.
+            </p>
+          </>
+        )}
 
         <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, cursor: "pointer" }}>
           <input

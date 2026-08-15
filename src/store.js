@@ -672,7 +672,7 @@ export async function updateSavingsRemote(savingsId, patch) {
 export async function fetchLoans(ledgerId) {
   const { data, error } = await supabase
     .from("loans")
-    .select("id,loan_type,direction,person_or_lender,principal_amount,monthly_repayment,include_in_net_balance,note,created_at")
+    .select("id,loan_type,direction,person_or_lender,principal_amount,monthly_repayment,start_date,include_in_net_balance,note,created_at")
     .eq("ledger_id", ledgerId)
     .order("created_at", { ascending: true });
   if (error) throw error;
@@ -683,6 +683,7 @@ export async function fetchLoans(ledgerId) {
     personOrLender: row.person_or_lender || "",
     principalAmount: row.principal_amount != null ? Number(row.principal_amount) : null,
     monthlyRepayment: row.monthly_repayment != null ? Number(row.monthly_repayment) : null,
+    startDate: row.start_date,
     includeInNetBalance: row.include_in_net_balance,
     note: row.note || "",
     createdAt: new Date(row.created_at).getTime(),
@@ -700,10 +701,11 @@ export async function createLoan(ledgerId, createdBy, loan) {
       person_or_lender: loan.personOrLender || null,
       principal_amount: loan.principalAmount || null,
       monthly_repayment: loan.monthlyRepayment || null,
+      start_date: loan.startDate,
       include_in_net_balance: loan.includeInNetBalance,
       note: loan.note || null,
     })
-    .select("id,loan_type,direction,person_or_lender,principal_amount,monthly_repayment,include_in_net_balance,note,created_at")
+    .select("id,loan_type,direction,person_or_lender,principal_amount,monthly_repayment,start_date,include_in_net_balance,note,created_at")
     .single();
   if (error) throw error;
   return {
@@ -713,6 +715,7 @@ export async function createLoan(ledgerId, createdBy, loan) {
     personOrLender: data.person_or_lender || "",
     principalAmount: data.principal_amount != null ? Number(data.principal_amount) : null,
     monthlyRepayment: data.monthly_repayment != null ? Number(data.monthly_repayment) : null,
+    startDate: data.start_date,
     includeInNetBalance: data.include_in_net_balance,
     note: data.note || "",
     createdAt: new Date(data.created_at).getTime(),
@@ -728,6 +731,7 @@ export async function updateLoan(loanId, loan) {
       person_or_lender: loan.personOrLender || null,
       principal_amount: loan.principalAmount || null,
       monthly_repayment: loan.monthlyRepayment || null,
+      start_date: loan.startDate,
       include_in_net_balance: loan.includeInNetBalance,
       note: loan.note || null,
     })

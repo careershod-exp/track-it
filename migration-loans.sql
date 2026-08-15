@@ -37,3 +37,7 @@ create policy "update loans in your ledgers" on loans for update
 drop policy if exists "delete loans in your ledgers" on loans;
 create policy "delete loans in your ledgers" on loans for delete
   using (exists (select 1 from ledger_members m where m.ledger_id = loans.ledger_id and m.user_id = auth.uid()));
+
+-- Run this too if you already applied the migration above before this fix —
+-- adds the repayment start date needed to know when a loan is paid off.
+alter table loans add column if not exists start_date date not null default current_date;
