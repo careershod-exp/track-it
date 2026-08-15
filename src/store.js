@@ -669,14 +669,10 @@ export async function updateSavingsRemote(savingsId, patch) {
 /* ---------------------------------------------------------------
    Loans (given or taken)
 ------------------------------------------------------------------ */
-export async function fetchLoans(ledgerId) {
-  const { data, error } = await supabase
-    .from("loans")
-    .select("id,loan_type,direction,person_or_lender,principal_amount,monthly_repayment,start_date,include_in_net_balance,note,created_at")
-    .eq("ledger_id", ledgerId)
-    .order("created_at", { ascending: true });
-  if (error) throw error;
-  return (data || []).map((row) => ({
+const LOAN_FIELDS = "id,loan_type,direction,person_or_lender,principal_amount,monthly_repayment,start_date,balance_override_amount,balance_override_date,include_in_net_balance,note,created_at";
+
+function mapLoanRow(row) {
+  return {
     id: row.id,
     loanType: row.loan_type,
     direction: row.direction,
@@ -684,10 +680,22 @@ export async function fetchLoans(ledgerId) {
     principalAmount: row.principal_amount != null ? Number(row.principal_amount) : null,
     monthlyRepayment: row.monthly_repayment != null ? Number(row.monthly_repayment) : null,
     startDate: row.start_date,
+    balanceOverrideAmount: row.balance_override_amount != null ? Number(row.balance_override_amount) : null,
+    balanceOverrideDate: row.balance_override_date,
     includeInNetBalance: row.include_in_net_balance,
     note: row.note || "",
     createdAt: new Date(row.created_at).getTime(),
-  }));
+  };
+}
+
+export async function fetchLoans(ledgerId) {
+  const { data, error } = await supabase
+    .from("loans")
+    .select(LOAN_FIELDS)
+    .eq("ledger_id", ledgerId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(mapLoanRow);
 }
 
 export async function createLoan(ledgerId, createdBy, loan) {
@@ -705,21 +713,10 @@ export async function createLoan(ledgerId, createdBy, loan) {
       include_in_net_balance: loan.includeInNetBalance,
       note: loan.note || null,
     })
-    .select("id,loan_type,direction,person_or_lender,principal_amount,monthly_repayment,start_date,include_in_net_balance,note,created_at")
+    .select(LOAN_FIELDS)
     .single();
   if (error) throw error;
-  return {
-    id: data.id,
-    loanType: data.loan_type,
-    direction: data.direction,
-    personOrLender: data.person_or_lender || "",
-    principalAmount: data.principal_amount != null ? Number(data.principal_amount) : null,
-    monthlyRepayment: data.monthly_repayment != null ? Number(data.monthly_repayment) : null,
-    startDate: data.start_date,
-    includeInNetBalance: data.include_in_net_balance,
-    note: data.note || "",
-    createdAt: new Date(data.created_at).getTime(),
-  };
+  return mapLoanRow(data);
 }
 
 export async function updateLoan(loanId, loan) {
@@ -735,6 +732,17 @@ export async function updateLoan(loanId, loan) {
       include_in_net_balance: loan.includeInNetBalance,
       note: loan.note || null,
     })
+    .eq("id", loanId);
+  if (error) throw error;
+}
+
+// A standalone correction to what's actually still owed — for a missed
+// payment, an early payoff, or any other real-world mismatch with the
+// automatic monthly schedule. Doesn't touch the loan's other fields.
+export async function updateLoanBalance(loanId, amount, date) {
+  const { error } = await supabase
+    .from("loans")
+    .update({ balance_override_amount: amount, balance_override_date: date })
     .eq("id", loanId);
   if (error) throw error;
 }
