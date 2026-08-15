@@ -157,9 +157,6 @@ function isStorageFullError(err) {
 // Works out a loan's actual standing as of a given month — how much of the
 // principal has been paid down by that point, how much (if anything) is
 // still owed, and whether that month's repayment should count toward Net
-// Works out a loan's actual standing as of a given month — how much of the
-// principal has been paid down by that point, how much (if anything) is
-// still owed, and whether that month's repayment should count toward Net
 // Balance at all. Without this, a loan's monthly repayment would keep
 // reducing Net Balance forever, long after it's genuinely been paid off.
 //
@@ -1398,25 +1395,42 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         if (due.length > 0) {
           const generated = [];
           const succeededIds = new Set();
+          let markFailed = false;
           for (const template of due) {
+            let saved;
             try {
               const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
               const day = Math.min(template.dayOfMonth || 1, daysInMonth);
               const dateStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-              const saved = await insertExpenseRemote(uid, currentUserId, {
+              saved = await insertExpenseRemote(uid, currentUserId, {
                 category: template.category, note: template.note, amount: template.amount,
                 date: dateStr, paymentMethod: template.paymentMethod,
               });
-              await markRecurringGenerated(template.id, nowMonthStr);
-              generated.push(saved);
-              succeededIds.add(template.id);
             } catch {
-              // If one template fails to generate, skip it silently rather than blocking the rest — it'll retry next load.
+              continue; // The entry itself never got created — genuinely skip, nothing to show or track.
+            }
+            // The entry was created either way from here — always show it
+            // and always treat it as generated for this session, even if
+            // the next step (marking it saved in the database) fails. See
+            // the matching comment on the recurring income version of this
+            // same logic for why.
+            generated.push(saved);
+            succeededIds.add(template.id);
+            try {
+              await markRecurringGenerated(template.id, nowMonthStr);
+            } catch {
+              markFailed = true;
             }
           }
           if (generated.length > 0) {
             finalExpenses = [...generated, ...finalExpenses];
             setRecurringNotice(`Added ${generated.length} recurring expense${generated.length > 1 ? "s" : ""} for this month.`);
+          }
+          if (markFailed) {
+            setRecurringNotice((prev) => {
+              const msg = "A recurring expense was added, but couldn't be saved as \"already added this month\" — it may duplicate again next time the app is opened. This usually means a database permission needs fixing.";
+              return prev ? `${prev} ${msg}` : msg;
+            });
           }
           finalRecurring = recurringRows.map((r) => (
             succeededIds.has(r.id) ? { ...r, lastGeneratedMonth: nowMonthStr } : r
@@ -1432,25 +1446,43 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         if (dueIncome.length > 0) {
           const generatedIncome = [];
           const succeededIncomeIds = new Set();
+          let markFailed = false;
           for (const template of dueIncome) {
+            let saved;
             try {
               const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
               const day = Math.min(template.dayOfMonth || 1, daysInMonth);
               const dateStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-              const saved = await insertIncomeRemote(uid, currentUserId, {
+              saved = await insertIncomeRemote(uid, currentUserId, {
                 source: template.source, note: template.note, amount: template.amount, date: dateStr,
               });
-              await markRecurringIncomeGenerated(template.id, nowMonthStr);
-              generatedIncome.push(saved);
-              succeededIncomeIds.add(template.id);
             } catch {
-              // Skip a failed template rather than blocking the rest — it'll retry next load.
+              continue; // The entry itself never got created — genuinely skip, nothing to show or track.
+            }
+            // The entry was created either way from here — always show it
+            // and always treat it as generated for this session, even if
+            // the next step (marking it saved in the database) fails.
+            // Otherwise a failure here would both hide a real entry from
+            // view AND cause it to duplicate again on the next reload —
+            // exactly what happened before this was fixed the first time.
+            generatedIncome.push(saved);
+            succeededIncomeIds.add(template.id);
+            try {
+              await markRecurringIncomeGenerated(template.id, nowMonthStr);
+            } catch {
+              markFailed = true;
             }
           }
           if (generatedIncome.length > 0) {
             finalIncome = [...generatedIncome, ...finalIncome];
             setRecurringNotice((prev) => {
               const msg = `Added ${generatedIncome.length} recurring income entr${generatedIncome.length > 1 ? "ies" : "y"} for this month.`;
+              return prev ? `${prev} ${msg}` : msg;
+            });
+          }
+          if (markFailed) {
+            setRecurringNotice((prev) => {
+              const msg = "A recurring income entry was added, but couldn't be saved as \"already added this month\" — it may duplicate again next time the app is opened. This usually means a database permission needs fixing.";
               return prev ? `${prev} ${msg}` : msg;
             });
           }
