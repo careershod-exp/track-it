@@ -26,6 +26,7 @@ import {
   fetchCardReminders, createCardReminder, deleteCardReminder, markCardReminderNotified,
   fetchNotifications, insertNotification, markNotificationsRead,
   updateSavingsRemote, fetchLoans, createLoan, updateLoan, deleteLoan, updateLoanBalance, updateIncomeRemote,
+  fetchExpensesForMonth, fetchIncomeForMonth,
 } from "./store";
 
 /* ---------------------------------------------------------------
@@ -119,6 +120,20 @@ const STATE_OPTIONS = {
 
 const AGE_RANGES = ["18-25", "26-35", "36-50", "50+"];
 const GENDER_OPTIONS = ["Male", "Female", "Prefer not to say"];
+// How far back the app loads expense/income history automatically on
+// startup. 14 months covers the 12-month trend chart with a safety
+// buffer, and comfortably covers normal "scroll back a few months"
+// calendar browsing — going back further than this fetches that
+// specific older month on demand instead (see the back-fill effect),
+// so nothing is ever actually unavailable, it just may take one extra
+// moment to load the first time you look that far back.
+const HISTORY_WINDOW_MONTHS = 14;
+function historyWindowStartDate() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - (HISTORY_WINDOW_MONTHS - 1), 1);
+  return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
 const LOAN_TYPES = [
   "Personal loan", "Auto loan", "Mortgage", "Student loan",
   "Credit card / Buy Now Pay Later", "Business loan",
@@ -1253,6 +1268,14 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
+  // Months earlier than this weren't included in the initial load — the
+  // back-fill effect fetches them on demand the first time someone
+  // navigates back that far. loadedOlderMonths tracks which ones have
+  // already been fetched this session, so navigating back and forth
+  // doesn't re-fetch the same month repeatedly.
+  const [historyWindowStart] = useState(historyWindowStartDate);
+  const [loadedOlderMonths, setLoadedOlderMonths] = useState(() => new Set());
+  const [loadingOlderMonth, setLoadingOlderMonth] = useState(false);
   const [activeFilters, setActiveFilters] = useState(new Set());
   const [formOpen, setFormOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
@@ -1363,10 +1386,11 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           return;
         }
 
+        const windowStart = historyWindowStartDate();
         const [profileData, expenseRows, members, incomeRows, recurringRows, savingsRows, recurringIncomeRows, cardReminderRows, notificationRows, loanRows] = await withTimeout(
           Promise.all([
-            fetchLedgerData(uid), fetchExpenses(uid), fetchMembers(uid).catch(() => []),
-            fetchIncome(uid).catch(() => []), fetchRecurringExpenses(uid).catch(() => []),
+            fetchLedgerData(uid), fetchExpenses(uid, windowStart), fetchMembers(uid).catch(() => []),
+            fetchIncome(uid, windowStart).catch(() => []), fetchRecurringExpenses(uid).catch(() => []),
             fetchSavings(uid).catch(() => []), fetchRecurringIncome(uid).catch(() => []),
             fetchCardReminders(uid).catch(() => []), fetchNotifications(uid).catch(() => []),
             fetchLoans(uid).catch(() => []),
@@ -2183,6 +2207,41 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [showAllPaymentMethods, setShowAllPaymentMethods] = useState(false);
   useEffect(() => { setShowAllExpenses(false); setShowAllIncome(false); }, [monthCursor, selectedDate, activeFilters, searchQuery]);
 
+  // If someone navigates back further than the initial rolling window,
+  // that month's data was never fetched — go get it now rather than
+  // silently showing an empty month. Runs whenever the viewed month
+  // changes; does nothing if the month's already covered by the initial
+  // load or was already back-filled earlier this session.
+  useEffect(() => {
+    if (profile.isDemo || !isOnline) return;
+    const cursorStart = `${monthCursor.getFullYear()}-${String(monthCursor.getMonth() + 1).padStart(2, "0")}-01`;
+    const monthKey = cursorStart.slice(0, 7);
+    if (cursorStart >= historyWindowStart) return; // already covered by the initial load
+    if (loadedOlderMonths.has(monthKey)) return; // already back-filled earlier this session
+    let cancelled = false;
+    setLoadingOlderMonth(true);
+    const nextMonth = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1);
+    const monthEnd = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
+    Promise.all([
+      fetchExpensesForMonth(uid, cursorStart, monthEnd).catch(() => []),
+      fetchIncomeForMonth(uid, cursorStart, monthEnd).catch(() => []),
+    ]).then(([olderExpenses, olderIncome]) => {
+      if (cancelled) return;
+      setExpenses((cur) => {
+        const existingIds = new Set(cur.map((x) => x.id));
+        return [...cur, ...olderExpenses.filter((x) => !existingIds.has(x.id))];
+      });
+      setIncome((cur) => {
+        const existingIds = new Set(cur.map((x) => x.id));
+        return [...cur, ...olderIncome.filter((x) => !existingIds.has(x.id))];
+      });
+      setLoadedOlderMonths((cur) => new Set(cur).add(monthKey));
+    }).finally(() => {
+      if (!cancelled) setLoadingOlderMonth(false);
+    });
+    return () => { cancelled = true; };
+  }, [monthCursor, historyWindowStart, loadedOlderMonths, profile.isDemo, isOnline, uid]);
+
   const paymentBreakdown = useMemo(() => {
     const map = {};
     monthExpenses.forEach((x) => {
@@ -2729,7 +2788,9 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
               </div>
             )}
             <div style={{ ...styles.totalRow, marginBottom: 4 }}>
-              <span style={{ fontSize: 12.5, opacity: 0.6 }}>Spent this month</span>
+              <span style={{ fontSize: 12.5, opacity: 0.6 }}>
+                {loadingOlderMonth ? "Loading this month…" : "Spent this month"}
+              </span>
               <span style={{ ...styles.totalNumber, fontSize: 28 }}><Money amount={monthTotal} size={22} /></span>
               {budgets.overall > 0 && (
                 <div style={{ width: "100%", marginTop: 6 }}>

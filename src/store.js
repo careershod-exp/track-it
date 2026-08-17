@@ -147,11 +147,43 @@ export async function savePaymentMethodsRemote(ledgerId, paymentMethods) {
   if (error) throw error;
 }
 
-export async function fetchExpenses(ledgerId) {
+// sinceDate (optional, "YYYY-MM-DD"): limits results to on/after this date.
+// Used to avoid pulling a household's entire multi-year history on every
+// app load — the initial load only needs a recent rolling window; older
+// months are fetched on demand only if someone actually navigates back
+// that far (see the back-fill effect in the Dashboard component).
+export async function fetchExpenses(ledgerId, sinceDate) {
+  let query = supabase
+    .from("expenses")
+    .select("id,date,category,note,amount,created_at,added_by,payment_method,receipt_path")
+    .eq("ledger_id", ledgerId);
+  if (sinceDate) query = query.gte("date", sinceDate);
+  const { data, error } = await query
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    id: row.id,
+    amount: Number(row.amount),
+    category: row.category,
+    date: row.date,
+    note: row.note || "",
+    createdAt: new Date(row.created_at).getTime(),
+    addedBy: row.added_by,
+    paymentMethod: row.payment_method || "",
+    receiptPath: row.receipt_path || "",
+  }));
+}
+
+// Fetches one specific month's expenses only — used for the on-demand
+// back-fill when someone navigates earlier than what's already loaded.
+export async function fetchExpensesForMonth(ledgerId, monthStartDate, monthEndDate) {
   const { data, error } = await supabase
     .from("expenses")
     .select("id,date,category,note,amount,created_at,added_by,payment_method,receipt_path")
     .eq("ledger_id", ledgerId)
+    .gte("date", monthStartDate)
+    .lt("date", monthEndDate)
     .order("date", { ascending: false })
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -259,11 +291,34 @@ export async function cancelInvite(inviteId) {
 /* ---------------------------------------------------------------
    Income
 ------------------------------------------------------------------ */
-export async function fetchIncome(ledgerId) {
+export async function fetchIncome(ledgerId, sinceDate) {
+  let query = supabase
+    .from("income")
+    .select("id,date,source,note,amount,created_at,added_by")
+    .eq("ledger_id", ledgerId);
+  if (sinceDate) query = query.gte("date", sinceDate);
+  const { data, error } = await query
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    id: row.id,
+    amount: Number(row.amount),
+    source: row.source,
+    date: row.date,
+    note: row.note || "",
+    createdAt: new Date(row.created_at).getTime(),
+    addedBy: row.added_by,
+  }));
+}
+
+export async function fetchIncomeForMonth(ledgerId, monthStartDate, monthEndDate) {
   const { data, error } = await supabase
     .from("income")
     .select("id,date,source,note,amount,created_at,added_by")
     .eq("ledger_id", ledgerId)
+    .gte("date", monthStartDate)
+    .lt("date", monthEndDate)
     .order("date", { ascending: false })
     .order("created_at", { ascending: false });
   if (error) throw error;
