@@ -20,7 +20,7 @@ import {
   fetchIncome, insertIncomeRemote, deleteIncomeRemote,
   fetchRecurringExpenses, createRecurringExpense, deleteRecurringExpense, markRecurringGenerated,
   logActivity, fetchActivityLog, saveCurrencyRemote, uploadReceipt, getReceiptUrl, deleteReceipt,
-  deleteLedger, updateMemberDisplayName,
+  deleteLedger, updateMemberDisplayName, updateLedgerName,
   fetchSavings, insertSavingsRemote, deleteSavingsRemote,
   fetchRecurringIncome, createRecurringIncome, deleteRecurringIncome, markRecurringIncomeGenerated,
   fetchCardReminders, createCardReminder, deleteCardReminder, markCardReminderNotified,
@@ -613,7 +613,7 @@ export default function App() {
     }
   };
 
-  const handleProfileSaved = (fullName) => {
+  const handleProfileSaved = (fullName, ledgerName) => {
     // Fire-and-forget: Dashboard's own member list will show the updated
     // name the moment it next loads regardless, this just makes any
     // ledgers the person already belongs to reflect it immediately too,
@@ -624,6 +624,20 @@ export default function App() {
         updateMemberDisplayName(l.id, session.user.id, fullName).catch(() => {});
       });
     }
+    // The ledger name itself was already saved to the DB by
+    // CompleteProfileModal before calling this — this just reflects that
+    // rename immediately in local state instead of showing the old
+    // placeholder name until next reload.
+    if (profile?.id) {
+      setLedgerList((prev) => prev.map((l) => (l.id === profile.id ? { ...l, name: ledgerName } : l)));
+      setProfile((prev) => (prev ? { ...prev, name: ledgerName } : prev));
+    }
+  };
+
+  const handleRenameLedger = async (ledgerId, name) => {
+    await updateLedgerName(ledgerId, name);
+    setLedgerList((prev) => prev.map((l) => (l.id === ledgerId ? { ...l, name } : l)));
+    setProfile((prev) => (prev && prev.id === ledgerId ? { ...prev, name } : prev));
   };
 
   return (
@@ -656,7 +670,7 @@ export default function App() {
           ) : passwordRecovery ? (
             <ResetPasswordScreen onDone={() => setPasswordRecovery(false)} />
           ) : needsProfileCompletion ? (
-            <CompleteProfileModal onSaved={handleProfileSaved} />
+            <CompleteProfileModal ledgerId={profile?.id || null} defaultLedgerName={profile?.name || ""} onSaved={handleProfileSaved} />
           ) : activeProfile ? (
             <Dashboard
               profile={activeProfile}
@@ -667,6 +681,7 @@ export default function App() {
               onSwitchLedger={handleSwitchLedger}
               onCreateLedger={handleCreateLedger}
               onDeleteLedger={handleDeleteLedger}
+              onRenameLedger={handleRenameLedger}
             />
           ) : profileError ? (
             <div style={{ ...styles.centerFill, color: T.parchment, textAlign: "center", padding: 24 }}>
@@ -709,7 +724,6 @@ function Footer() {
 ================================================================= */
 function AuthScreen({ onLogin }) {
   const [mode, setMode] = useState("signin"); // signin | signup | forgot
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -758,8 +772,6 @@ function AuthScreen({ onLogin }) {
   const handleSignUp = async (e) => {
     e?.preventDefault?.();
     setError(""); setNotice("");
-    const trimmedName = name.trim();
-    if (!trimmedName) return setError("Tell us what to call your ledger.");
     if (!email.trim()) return setError("Enter your email.");
     if (password.length < 6) return setError("Password needs to be at least 6 characters.");
     setBusy(true);
@@ -768,7 +780,6 @@ function AuthScreen({ onLogin }) {
         supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { data: { display_name: trimmedName } },
         }),
         8000
       );
@@ -858,17 +869,9 @@ function AuthScreen({ onLogin }) {
             </div>
           ) : (
             <div>
-              <label style={styles.label}>Name this ledger</label>
-              <input
-                autoFocus
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                style={styles.textInput}
-                placeholder="e.g. Sam, or Household"
-                maxLength={24}
-              />
               <label style={styles.label}>Email</label>
               <input
+                autoFocus
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -979,9 +982,10 @@ function ResetPasswordScreen({ onDone }) {
    COMPLETE PROFILE (mandatory full name, first login — including
    retroactively for anyone who signed up before this existed)
 ================================================================= */
-function CompleteProfileModal({ onSaved }) {
+function CompleteProfileModal({ ledgerId, defaultLedgerName, onSaved }) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [ledgerName, setLedgerName] = useState(defaultLedgerName || "");
   const [country, setCountry] = useState("United Arab Emirates");
   const [state, setState] = useState("");
   const [ageRange, setAgeRange] = useState("");
@@ -998,13 +1002,17 @@ function CompleteProfileModal({ onSaved }) {
     setError("");
     const first = firstName.trim();
     const last = lastName.trim();
+    const trimmedLedgerName = ledgerName.trim();
     if (!first) return setError("First name is required.");
     if (!last) return setError("Last name is required.");
+    if (!trimmedLedgerName) return setError("Give your ledger a name.");
     if (!country) return setError("Country is required.");
     if (!ageRange) return setError("Please select your age range.");
     if (!consent) return setError("Please check the box to agree before continuing.");
+    if (!ledgerId) return setError("Still setting up your ledger — please wait a moment and try again.");
     setBusy(true);
     try {
+      await updateLedgerName(ledgerId, trimmedLedgerName);
       const { error: err } = await supabase.auth.updateUser({
         data: {
           first_name: first,
@@ -1021,8 +1029,9 @@ function CompleteProfileModal({ onSaved }) {
       if (err) throw err;
       // The auth listener in App picks up the updated session from here,
       // which is what actually moves past this screen — this callback just
-      // handles the follow-up work (syncing the name to existing ledgers).
-      onSaved?.(`${first} ${last}`);
+      // handles the follow-up work (syncing the name to existing ledgers,
+      // and reflecting the new ledger name immediately in local state).
+      onSaved?.(`${first} ${last}`, trimmedLedgerName);
     } catch (err) {
       setError(err?.message || "Couldn't save that. Please try again.");
     } finally {
@@ -1063,6 +1072,15 @@ function CompleteProfileModal({ onSaved }) {
             onChange={(e) => setLastName(e.target.value)}
             placeholder="e.g. Rivera"
             maxLength={40}
+          />
+
+          <label style={styles.label}>Name this ledger</label>
+          <input
+            style={styles.textInput}
+            value={ledgerName}
+            onChange={(e) => setLedgerName(e.target.value)}
+            placeholder="e.g. Sam, or Household"
+            maxLength={24}
           />
 
           <label style={styles.label}>Country</label>
@@ -1261,7 +1279,7 @@ function MfaChallengeScreen({ onVerified, onCancel }) {
 /* ================================================================
    DASHBOARD
 ================================================================= */
-function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, onSwitchLedger, onCreateLedger, onDeleteLedger }) {
+function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, onSwitchLedger, onCreateLedger, onDeleteLedger, onRenameLedger }) {
   const [expenses, setExpenses] = useState(null);
   const [customCategories, setCustomCategories] = useState([]);
   const [monthCursor, setMonthCursor] = useState(() => {
@@ -2632,6 +2650,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           onSwitch={(id) => { onSwitchLedger(id); setLedgerSwitcherOpen(false); }}
           onCreate={async (name) => { await onCreateLedger(name); setLedgerSwitcherOpen(false); }}
           onDelete={async () => { await onDeleteLedger(uid); setLedgerSwitcherOpen(false); }}
+          onRename={onRenameLedger}
           onClose={() => setLedgerSwitcherOpen(false)}
         />
       )}
@@ -4898,6 +4917,10 @@ function CsvImportModal({ categories, onImport, onClose }) {
 ================================================================= */
 function BudgetForm({ categories, budgets, onCancel, onSave }) {
   const [overall, setOverall] = useState(budgets.overall != null ? String(budgets.overall) : "");
+  // A pre-existing overall value counts as the user's own setting from the
+  // start; a blank one means "follow the category total" until they type
+  // into the field themselves.
+  const [overallTouched, setOverallTouched] = useState(budgets.overall != null);
   const [catValues, setCatValues] = useState(() => {
     const init = {};
     categories.forEach((c) => {
@@ -4905,19 +4928,46 @@ function BudgetForm({ categories, budgets, onCancel, onSave }) {
     });
     return init;
   });
+  const [blockState, setBlockState] = useState(null); // null | { sum }
+
+  const categorySum = useMemo(() => {
+    return Object.values(catValues).reduce((acc, val) => {
+      const n = parseFloat(val);
+      return acc + (n > 0 ? n : 0);
+    }, 0);
+  }, [catValues]);
+
+  // As long as the person hasn't set their own overall total, keep it
+  // dynamically matching the sum of the categories — this is what fixes
+  // "itemized budgets set, overall left blank, nothing reflects."
+  useEffect(() => {
+    if (!overallTouched) {
+      setOverall(categorySum > 0 ? String(categorySum) : "");
+    }
+  }, [categorySum, overallTouched]);
 
   const setCatValue = (name, val) => {
     setCatValues((prev) => ({ ...prev, [name]: val.replace(/[^0-9.]/g, "") }));
   };
 
-  const submit = () => {
+  const attemptSave = () => {
     const parsedCats = {};
     Object.entries(catValues).forEach(([name, val]) => {
       const n = parseFloat(val);
       if (n > 0) parsedCats[name] = n;
     });
     const overallNum = parseFloat(overall);
-    onSave({ overall: overallNum > 0 ? overallNum : null, categories: parsedCats });
+
+    // Only a manually-set total that's smaller than the itemized sum is a
+    // real conflict — a total that's still following the sum automatically
+    // can never trigger this.
+    if (overallTouched && overallNum > 0 && categorySum > overallNum) {
+      setBlockState({ sum: categorySum });
+      return;
+    }
+
+    const finalOverall = overallNum > 0 ? overallNum : (categorySum > 0 ? categorySum : null);
+    onSave({ overall: finalOverall, categories: parsedCats });
   };
 
   return (
@@ -4928,7 +4978,8 @@ function BudgetForm({ categories, budgets, onCancel, onSave }) {
           <button type="button" style={styles.iconGhostBtnDark} onClick={onCancel}><X size={18} /></button>
         </div>
         <p style={{ fontSize: 13, opacity: 0.6, marginTop: 4 }}>
-          Set a monthly cap overall and per category. Leave blank for no limit.
+          Set a monthly cap overall and per category. The overall total automatically
+          matches your category totals unless you set your own limit below.
         </p>
 
         <label style={styles.label}>Overall monthly budget</label>
@@ -4937,11 +4988,16 @@ function BudgetForm({ categories, budgets, onCancel, onSave }) {
           <input
             inputMode="decimal"
             value={overall}
-            onChange={(e) => setOverall(e.target.value.replace(/[^0-9.]/g, ""))}
+            onChange={(e) => { setOverall(e.target.value.replace(/[^0-9.]/g, "")); setOverallTouched(true); }}
             style={styles.amountInput}
             placeholder="no limit"
           />
         </div>
+        {!overallTouched && categorySum > 0 && (
+          <p style={{ fontSize: 12, opacity: 0.55, marginTop: -4, marginBottom: 0 }}>
+            Set to match your category totals — type a value above to set your own limit instead.
+          </p>
+        )}
 
         <label style={styles.label}>Per category</label>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 260, overflowY: "auto" }}>
@@ -4963,11 +5019,42 @@ function BudgetForm({ categories, budgets, onCancel, onSave }) {
         </div>
 
         <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          <button type="button" style={{ ...styles.primaryBtn, flex: 1 }} onClick={submit}>
+          <button type="button" style={{ ...styles.primaryBtn, flex: 1 }} onClick={attemptSave}>
             <Check size={16} /> Save budgets
           </button>
         </div>
       </div>
+
+      {blockState && (
+        <div style={styles.modalOverlay} onClick={(e) => e.stopPropagation()}>
+          <div style={{ ...styles.modalCard, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 18, margin: 0 }}>Categories exceed your total</h2>
+            </div>
+            <p style={{ fontSize: 13.5, opacity: 0.75, marginTop: 4 }}>
+              Your category budgets add up to more than your overall budget. Adjust the amounts, or raise
+              your overall budget to match.
+            </p>
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button type="button" style={{ ...styles.textBtn, flex: 1 }} onClick={() => setBlockState(null)}>
+                Edit budgets
+              </button>
+              <button
+                type="button"
+                className="btn-lift"
+                style={{ ...styles.primaryBtn, flex: 1 }}
+                onClick={() => {
+                  setOverall(String(blockState.sum));
+                  setOverallTouched(true);
+                  setBlockState(null);
+                }}
+              >
+                Use categories total
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -5499,7 +5586,7 @@ function ActivityLogModal({ ledgerId, onClose }) {
 /* ================================================================
    LEDGER SWITCHER
 ================================================================= */
-function LedgerSwitcherModal({ ledgerList, activeId, isOwner, onSwitch, onCreate, onDelete, onClose }) {
+function LedgerSwitcherModal({ ledgerList, activeId, isOwner, onSwitch, onCreate, onDelete, onRename, onClose }) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [error, setError] = useState("");
@@ -5508,8 +5595,28 @@ function LedgerSwitcherModal({ ledgerList, activeId, isOwner, onSwitch, onCreate
   const [confirmText, setConfirmText] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
 
   const activeLedger = (ledgerList || []).find((l) => l.id === activeId);
+
+  const handleRename = async (ledgerId) => {
+    const trimmed = renameValue.trim();
+    if (!trimmed) return setRenameError("Ledger name can't be empty.");
+    setRenameBusy(true);
+    setRenameError("");
+    try {
+      await onRename(ledgerId, trimmed);
+      setRenamingId(null);
+      setRenameValue("");
+    } catch (err) {
+      setRenameError(err?.message || "Couldn't rename that ledger. Please try again.");
+    } finally {
+      setRenameBusy(false);
+    }
+  };
 
   const handleCreate = async (e) => {
     e?.preventDefault?.();
@@ -5548,24 +5655,83 @@ function LedgerSwitcherModal({ ledgerList, activeId, isOwner, onSwitch, onCreate
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-          {(ledgerList || []).map((l) => (
-            <button
-              key={l.id}
-              type="button"
-              className="profile-row"
-              style={{
-                ...styles.profileRow,
-                borderLeft: `3px solid ${l.id === activeId ? T.gold : "transparent"}`,
-                cursor: l.id === activeId ? "default" : "pointer",
-              }}
-              onClick={() => l.id !== activeId && onSwitch(l.id)}
-            >
-              <span style={{ ...styles.profileAvatar, background: T.parchmentDim }}><BookMarked size={14} color={T.ink} /></span>
-              <span style={{ fontWeight: 600 }}>{l.name}</span>
-              {l.id === activeId && <Check size={14} style={{ marginLeft: "auto", opacity: 0.6 }} />}
-            </button>
-          ))}
+          {(ledgerList || []).map((l) => {
+            const isActive = l.id === activeId;
+            const isRenamingThis = renamingId === l.id;
+            const canManage = isActive && isOwner;
+            return (
+              <div
+                key={l.id}
+                className="profile-row"
+                style={{
+                  ...styles.profileRow,
+                  borderLeft: `3px solid ${isActive ? T.gold : "transparent"}`,
+                }}
+              >
+                <span style={{ ...styles.profileAvatar, background: T.parchmentDim }}><BookMarked size={14} color={T.ink} /></span>
+                {isRenamingThis ? (
+                  <>
+                    <input
+                      autoFocus
+                      style={{ ...styles.textInput, margin: 0, flex: 1, padding: "6px 8px" }}
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      maxLength={24}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleRename(l.id);
+                        if (e.key === "Escape") { setRenamingId(null); setRenameValue(""); setRenameError(""); }
+                      }}
+                    />
+                    <button type="button" style={styles.rowIconBtn} disabled={renameBusy} onClick={() => handleRename(l.id)} title="Save name">
+                      <Check size={14} />
+                    </button>
+                    <button type="button" style={styles.rowIconBtn} onClick={() => { setRenamingId(null); setRenameValue(""); setRenameError(""); }} title="Cancel">
+                      <X size={14} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => !isActive && onSwitch(l.id)}
+                      style={{
+                        flex: 1, textAlign: "left", background: "none", border: "none", padding: 0,
+                        cursor: isActive ? "default" : "pointer", fontWeight: 600, fontSize: 14,
+                        color: T.ink, fontFamily: "inherit",
+                      }}
+                    >
+                      {l.name}
+                    </button>
+                    {isActive && <Check size={14} style={{ opacity: 0.6, flexShrink: 0 }} />}
+                    {canManage && (
+                      <>
+                        <button
+                          type="button"
+                          className="row-icon-hover"
+                          style={{ ...styles.rowIconBtn, opacity: 0.8 }}
+                          onClick={() => { setRenamingId(l.id); setRenameValue(l.name); setRenameError(""); }}
+                          title="Rename ledger"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="row-icon-hover"
+                          style={{ ...styles.rowIconBtn, color: T.brick, opacity: 1 }}
+                          onClick={() => setConfirmingDelete(true)}
+                          title="Delete ledger"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
+        {renameError && <p style={styles.errorText}>{renameError}</p>}
 
         {!creating ? (
           <button type="button" className="btn-lift" style={{ ...styles.secondaryBtn, marginTop: 14 }} onClick={() => setCreating(true)}>
@@ -5593,46 +5759,34 @@ function LedgerSwitcherModal({ ledgerList, activeId, isOwner, onSwitch, onCreate
           </div>
         )}
 
-        {isOwner && activeLedger && (
+        {isOwner && activeLedger && confirmingDelete && (
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${T.parchmentDim}` }}>
-            {!confirmingDelete ? (
+            <p style={{ fontSize: 13, color: T.brick, fontWeight: 600, marginBottom: 4 }}>
+              This permanently deletes every expense, income entry, budget, and receipt photo in
+              "{activeLedger.name}" — for every member, not just you. This can't be undone.
+            </p>
+            <label style={styles.label}>Type "{activeLedger.name}" to confirm</label>
+            <input
+              style={styles.textInput}
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder={activeLedger.name}
+            />
+            {deleteError && <p style={styles.errorText}>{deleteError}</p>}
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <button type="button" style={styles.textBtn} onClick={() => { setConfirmingDelete(false); setConfirmText(""); setDeleteError(""); }}>
+                Cancel
+              </button>
               <button
                 type="button"
-                style={{ ...styles.textBtn, color: T.brick, display: "flex", alignItems: "center", gap: 6 }}
-                onClick={() => setConfirmingDelete(true)}
+                className="btn-lift"
+                style={{ ...styles.primaryBtn, flex: 1, background: T.brick }}
+                disabled={deleting}
+                onClick={handleDelete}
               >
-                <Trash2 size={14} /> Delete "{activeLedger.name}"
+                {deleting ? "Deleting…" : "Delete permanently"}
               </button>
-            ) : (
-              <div>
-                <p style={{ fontSize: 13, color: T.brick, fontWeight: 600, marginBottom: 4 }}>
-                  This permanently deletes every expense, income entry, budget, and receipt photo in
-                  "{activeLedger.name}" — for every member, not just you. This can't be undone.
-                </p>
-                <label style={styles.label}>Type "{activeLedger.name}" to confirm</label>
-                <input
-                  style={styles.textInput}
-                  value={confirmText}
-                  onChange={(e) => setConfirmText(e.target.value)}
-                  placeholder={activeLedger.name}
-                />
-                {deleteError && <p style={styles.errorText}>{deleteError}</p>}
-                <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                  <button type="button" style={styles.textBtn} onClick={() => { setConfirmingDelete(false); setConfirmText(""); setDeleteError(""); }}>
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-lift"
-                    style={{ ...styles.primaryBtn, flex: 1, background: T.brick }}
-                    disabled={deleting}
-                    onClick={handleDelete}
-                  >
-                    {deleting ? "Deleting…" : "Delete permanently"}
-                  </button>
-                </div>
-              </div>
-            )}
+            </div>
           </div>
         )}
 

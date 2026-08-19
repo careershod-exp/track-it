@@ -117,6 +117,11 @@ export async function createLedger(userId, name, displayName) {
   return created;
 }
 
+export async function updateLedgerName(ledgerId, name) {
+  const { error } = await supabase.from("ledgers").update({ name }).eq("id", ledgerId);
+  if (error) throw error;
+}
+
 export async function fetchLedgerData(ledgerId) {
   const { data, error } = await supabase
     .from("ledgers")
