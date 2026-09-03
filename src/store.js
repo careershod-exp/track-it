@@ -147,6 +147,36 @@ export async function saveBudgetsRemote(ledgerId, budgets) {
   if (error) throw error;
 }
 
+// Budget version history — lets a budget change apply from the current
+// month forward without rewriting what past months already showed. Each
+// row is "the budget that took effect starting this calendar month."
+// Reading for any given month means picking the most recent row whose
+// effective_from is on or before that month.
+export async function fetchBudgetVersions(ledgerId) {
+  const { data, error } = await supabase
+    .from("budget_versions")
+    .select("effective_from,overall,categories")
+    .eq("ledger_id", ledgerId)
+    .order("effective_from", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function saveBudgetVersion(ledgerId, effectiveFrom, budgets) {
+  const { error } = await supabase
+    .from("budget_versions")
+    .upsert(
+      {
+        ledger_id: ledgerId,
+        effective_from: effectiveFrom,
+        overall: budgets.overall,
+        categories: budgets.categories || {},
+      },
+      { onConflict: "ledger_id,effective_from" }
+    );
+  if (error) throw error;
+}
+
 export async function savePaymentMethodsRemote(ledgerId, paymentMethods) {
   const { error } = await supabase.from("ledgers").update({ payment_methods: paymentMethods }).eq("id", ledgerId);
   if (error) throw error;

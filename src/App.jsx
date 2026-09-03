@@ -14,7 +14,8 @@ import Papa from "papaparse";
 import { supabase } from "./supabaseClient";
 import {
   pingDatabase, ensureLedger, fetchLedgerData, fetchUserLedgers, createLedger,
-  saveCategoriesRemote, saveBudgetsRemote, savePaymentMethodsRemote, fetchExpenses,
+  saveCategoriesRemote, savePaymentMethodsRemote, fetchExpenses,
+  fetchBudgetVersions, saveBudgetVersion,
   insertExpenseRemote, updateExpenseRemote, deleteExpenseRemote,
   fetchMembers, fetchPendingInvites, inviteMember, cancelInvite,
   fetchIncome, insertIncomeRemote, deleteIncomeRemote,
@@ -212,6 +213,24 @@ function loanStatusForMonth(loan, monthCursor) {
   const thisMonthAmount = viewedMonthIndex < startMonthIndex ? 0 : Math.min(monthly, remainingBeforeThisMonth);
 
   return { remainingBalance, thisMonthAmount, isPaidOff: remainingBalance <= 0 && paymentsDueSoFar > 0 };
+}
+
+// Budgets are versioned by the calendar month they took effect in (see
+// store.js's budget_versions table) so that changing a budget today only
+// changes it from this month forward — past months keep showing whatever
+// was actually in effect for them at the time. Mirrors loanStatusForMonth's
+// "most recent applicable override" approach above.
+function resolveBudgetsForDate(versions, dateObj) {
+  if (!versions || versions.length === 0) return { overall: null, categories: {} };
+  const monthStart = new Date(dateObj.getFullYear(), dateObj.getMonth(), 1);
+  let best = null;
+  for (const v of versions) {
+    const vDate = new Date(v.effective_from + "T00:00:00");
+    if (vDate <= monthStart && (!best || vDate > new Date(best.effective_from + "T00:00:00"))) {
+      best = v;
+    }
+  }
+  return best ? { overall: best.overall, categories: best.categories || {} } : { overall: null, categories: {} };
 }
 
 function fmtDateTime(ms) {
@@ -1300,6 +1319,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [justAddedId, setJustAddedId] = useState(null);
   const [error, setError] = useState("");
   const [budgets, setBudgets] = useState({ overall: null, categories: {} });
+  const [budgetVersions, setBudgetVersions] = useState([]);
   const [budgetFormOpen, setBudgetFormOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [ledgerSwitcherOpen, setLedgerSwitcherOpen] = useState(false);
@@ -1405,20 +1425,25 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         }
 
         const windowStart = historyWindowStartDate();
-        const [profileData, expenseRows, members, incomeRows, recurringRows, savingsRows, recurringIncomeRows, cardReminderRows, notificationRows, loanRows] = await withTimeout(
+        const [profileData, expenseRows, members, incomeRows, recurringRows, savingsRows, recurringIncomeRows, cardReminderRows, notificationRows, loanRows, budgetVersionRows] = await withTimeout(
           Promise.all([
             fetchLedgerData(uid), fetchExpenses(uid, windowStart), fetchMembers(uid).catch(() => []),
             fetchIncome(uid, windowStart).catch(() => []), fetchRecurringExpenses(uid).catch(() => []),
             fetchSavings(uid).catch(() => []), fetchRecurringIncome(uid).catch(() => []),
             fetchCardReminders(uid).catch(() => []), fetchNotifications(uid).catch(() => []),
-            fetchLoans(uid).catch(() => []),
+            fetchLoans(uid).catch(() => []), fetchBudgetVersions(uid).catch(() => []),
           ]),
           8000
         );
         let finalExpenses = expenseRows;
         let finalIncome = incomeRows;
         setCustomCategories(profileData.categories);
-        setBudgets(profileData.budgets);
+        setBudgetVersions(budgetVersionRows);
+        setBudgets(
+          budgetVersionRows.length > 0
+            ? resolveBudgetsForDate(budgetVersionRows, monthCursor)
+            : profileData.budgets
+        );
         setPaymentMethods(profileData.paymentMethods);
         setCurrency(profileData.currency || "AED");
         setSavings(savingsRows);
@@ -1630,10 +1655,19 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 
   const persistBudgets = useCallback(async (next) => {
     if (!profile.isDemo && !isOnline) { setError("Changing budgets needs an internet connection."); return; }
-    setBudgets(next);
-    if (profile.isDemo) return;
+    if (profile.isDemo) { setBudgets(next); return; }
+    const now = new Date();
+    const effectiveFrom = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    // Optimistic local update — replaces any version already recorded for
+    // this month (e.g. a second edit within the same month) rather than
+    // creating a duplicate, so "current month" always means the latest edit.
+    setBudgetVersions((prev) => {
+      const withoutCurrent = prev.filter((v) => v.effective_from !== effectiveFrom);
+      return [...withoutCurrent, { effective_from: effectiveFrom, overall: next.overall, categories: next.categories || {} }]
+        .sort((a, b) => (a.effective_from < b.effective_from ? -1 : a.effective_from > b.effective_from ? 1 : 0));
+    });
     try {
-      await withTimeout(saveBudgetsRemote(uid, next), 8000);
+      await withTimeout(saveBudgetVersion(uid, effectiveFrom, next), 8000);
     } catch {
       setError("Budget saved locally, but syncing failed.");
     }
@@ -1754,6 +1788,12 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const myDisplayName = memberNames[currentUserId] || "Someone";
 
   const handleSaveExpense = async (payload) => {
+    // Budget alerts should reflect whatever budget was actually in effect
+    // for the month the expense is dated in — not the month currently
+    // being viewed on the dashboard (relevant when backdating an entry).
+    const budgetsForPayloadMonth = budgetVersions.length > 0
+      ? resolveBudgetsForDate(budgetVersions, new Date(payload.date + "T00:00:00"))
+      : budgets;
     if (editingExpense && !isOnline) {
       setError("Editing needs an internet connection.");
       return;
@@ -1782,7 +1822,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       queue.push({ localId, type: "expense", payload: rest, createdAt: Date.now() });
       saveOfflineQueue(uid, queue);
       setPendingSyncCount(queue.length);
-      checkBudgets(finalList, payload.date, payload.category, budgets);
+      checkBudgets(finalList, payload.date, payload.category, budgetsForPayloadMonth);
       setFormOpen(false);
       setEditingExpense(null);
       return;
@@ -1843,7 +1883,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     } catch {
       setError("Saved locally, but syncing failed.");
     }
-    checkBudgets(finalList, payload.date, payload.category, budgets);
+    checkBudgets(finalList, payload.date, payload.category, budgetsForPayloadMonth);
     setFormOpen(false);
     setEditingExpense(null);
   };
@@ -2214,6 +2254,17 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         return b.value - a.value;
       });
   }, [categories, monthExpenses, budgets]);
+
+  // Re-resolve which budget applies whenever the viewed month changes (or
+  // the version history itself changes, e.g. right after saving a new
+  // budget) — so navigating to a past month shows what was actually set
+  // for it at the time, not whatever the budget is today. Demo mode never
+  // populates budgetVersions, so it keeps using whatever setBudgets was
+  // called with directly, unaffected by this.
+  useEffect(() => {
+    if (budgetVersions.length === 0) return;
+    setBudgets(resolveBudgetsForDate(budgetVersions, monthCursor));
+  }, [budgetVersions, monthCursor]);
 
   // Categories with no spending and no budget this month are just noise in
   // the list — tucked behind "show all" instead of always taking up space.
@@ -3426,7 +3477,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       {budgetFormOpen && (
         <BudgetForm
           categories={categories}
-          budgets={budgets}
+          budgets={budgetVersions.length > 0 ? resolveBudgetsForDate(budgetVersions, new Date()) : budgets}
           onCancel={() => setBudgetFormOpen(false)}
           onSave={async (next) => { await persistBudgets(next); setBudgetFormOpen(false); }}
         />
