@@ -2876,10 +2876,18 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, width: "100%", marginTop: 12 }}>
                 {budgets.overall > 0 ? (
-                  <div style={{ ...styles.statPill, background: "#25344F" }}>
+                  <button
+                    type="button"
+                    onClick={() => setBudgetFormOpen(true)}
+                    title="Tap to edit your budget"
+                    style={{
+                      ...styles.statPill, background: "#25344F", border: "none", cursor: "pointer",
+                      font: "inherit", textAlign: "center",
+                    }}
+                  >
                     <span style={{ ...styles.statPillLabel, color: "#9DB4D9" }}><Target size={11} /> Budget</span>
                     <span style={{ ...styles.statPillValue, color: "#9DB4D9" }}><Money amount={budgets.overall} size={15} color="#9DB4D9" /></span>
-                  </div>
+                  </button>
                 ) : (
                   <button type="button" onClick={() => setBudgetFormOpen(true)} style={styles.statPillEmpty}>
                     <Target size={13} /> No budget set yet — tap to set one
