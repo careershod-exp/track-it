@@ -117,8 +117,14 @@ export async function createLedger(userId, name, displayName) {
   return created;
 }
 
+// Goes through a dedicated, owner-checked function rather than a plain
+// column update — the ledgers table's RLS update policy allows any
+// member to update the row (needed so members can edit shared
+// categories/budgets/payment methods), so renaming needs its own
+// ownership check rather than relying on that broader policy. See
+// migration-ledger-ownership-lockdown.sql.
 export async function updateLedgerName(ledgerId, name) {
-  const { error } = await supabase.from("ledgers").update({ name }).eq("id", ledgerId);
+  const { error } = await supabase.rpc("rename_ledger", { p_ledger_id: ledgerId, p_new_name: name });
   if (error) throw error;
 }
 
