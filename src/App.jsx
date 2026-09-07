@@ -377,6 +377,27 @@ function saveOfflineQueue(uid, queue) {
   try { localStorage.setItem(queueKey(uid), JSON.stringify(queue)); } catch { /* best effort */ }
 }
 
+// Every key this app ever writes to localStorage includes the user's id
+// somewhere in its name (trackit-cache-<uid>, trackit-active-ledger-<uid>,
+// trackit-month-end-<uid>-<month>, etc). Rather than maintain an exact
+// list that has to be kept in sync as new keys get added over time, this
+// removes anything under the trackit- namespace that contains this uid —
+// so signing out actually clears cached financial data (expenses, income,
+// budgets, loans, payment methods) from the browser, not just the
+// Supabase session. Security review finding: signing out previously left
+// all of this readable on a shared/borrowed device indefinitely.
+function clearLocalUserData(uid) {
+  if (!uid) return;
+  try {
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("trackit-") && key.includes(uid)) toRemove.push(key);
+    }
+    toRemove.forEach((key) => localStorage.removeItem(key));
+  } catch { /* best effort — a full sign-out shouldn't be blocked by storage access failing */ }
+}
+
 function buildDemoData() {
   const now = new Date();
   const iso = (y, m, d) => {
@@ -590,6 +611,7 @@ export default function App() {
       setDemoProfile(null);
       return;
     }
+    clearLocalUserData(session?.user?.id);
     await supabase.auth.signOut();
   };
 
@@ -684,7 +706,7 @@ export default function App() {
           ) : mfaPending ? (
             <MfaChallengeScreen
               onVerified={() => setMfaPending(false)}
-              onCancel={() => supabase.auth.signOut()}
+              onCancel={handleLogout}
             />
           ) : passwordRecovery ? (
             <ResetPasswordScreen onDone={() => setPasswordRecovery(false)} />
@@ -705,7 +727,7 @@ export default function App() {
           ) : profileError ? (
             <div style={{ ...styles.centerFill, color: T.parchment, textAlign: "center", padding: 24 }}>
               <p>{profileError}</p>
-              <button style={styles.primaryBtn} onClick={() => supabase.auth.signOut()}>Sign out</button>
+              <button style={styles.primaryBtn} onClick={handleLogout}>Sign out</button>
             </div>
           ) : (
             <AuthScreen onLogin={setDemoProfile} />

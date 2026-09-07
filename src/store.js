@@ -320,6 +320,10 @@ export async function inviteMember(ledgerId, invitedBy, email) {
   });
   if (error) {
     if (error.code === "23505") throw new Error("That person has already been invited.");
+    // Raised by the enforce_invite_rate_limit trigger (see
+    // migration-invite-rate-limit.sql) — surface its own message as-is
+    // rather than a raw Postgres error code.
+    if (error.code === "P0001") throw new Error(error.message);
     throw error;
   }
 }
