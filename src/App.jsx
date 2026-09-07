@@ -170,6 +170,14 @@ function isStorageFullError(err) {
   return msg.includes("quota") || msg.includes("exceeded the maximum") || msg.includes("insufficient storage") || msg.includes("storage limit");
 }
 
+// Distinguishes uploadReceipt()'s own client-side validation errors (too
+// large / wrong file type) from a genuine network/storage failure, so the
+// specific reason can be shown instead of a generic "didn't upload".
+function isReceiptValidationError(err) {
+  const msg = err?.message || "";
+  return msg.includes("too large") || msg.includes("must be a photo");
+}
+
 // Works out a loan's actual standing as of a given month — how much of the
 // principal has been paid down by that point, how much (if anything) is
 // still owed, and whether that month's repayment should count toward Net
@@ -1862,7 +1870,9 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
             receiptPath = await uploadReceipt(uid, editingExpense.id, receiptFile);
           } catch (err) {
             setError(
-              isStorageFullError(err)
+              isReceiptValidationError(err)
+                ? err.message
+                : isStorageFullError(err)
                 ? "There's no storage space left for the receipt photo. The rest of your changes were saved."
                 : "The receipt photo didn't upload. The rest of your changes were saved."
             );
@@ -1891,7 +1901,9 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
               saved = { ...saved, receiptPath };
             } catch (err) {
               setError(
-                isStorageFullError(err)
+                isReceiptValidationError(err)
+                  ? `Expense saved, but ${err.message.charAt(0).toLowerCase()}${err.message.slice(1)}`
+                  : isStorageFullError(err)
                   ? "Expense saved, but there's no storage space left for the receipt photo. Contact support to free up space."
                   : "Saved, but the receipt photo didn't upload."
               );

@@ -39,13 +39,21 @@ export async function ensureLedger(user) {
       .ilike("email", email);
     if (invites && invites.length > 0) {
       for (const invite of invites) {
-        await supabase.from("ledger_members").insert({
+        const { error: joinErr } = await supabase.from("ledger_members").insert({
           ledger_id: invite.ledger_id,
           user_id: user.id,
           display_name: personName,
           role: "member",
-        }); // ignore errors here (e.g. already a member) — the delete below still cleans up the invite
-        await supabase.from("ledger_invites").delete().eq("id", invite.id);
+        });
+        // Only clear the invite once they've actually joined — either
+        // this succeeded, or they were already a member (23505 = unique
+        // violation on the ledger_id/user_id primary key). Any other
+        // error means something genuinely went wrong, and deleting the
+        // invite here would strand them without ever joining the shared
+        // ledger, with nothing telling either of them what happened.
+        if (!joinErr || joinErr.code === "23505") {
+          await supabase.from("ledger_invites").delete().eq("id", invite.id);
+        }
       }
     }
   }
@@ -507,7 +515,22 @@ export async function saveCurrencyRemote(ledgerId, currencyCode) {
 /* ---------------------------------------------------------------
    Receipt photos
 ------------------------------------------------------------------ */
+const RECEIPT_MAX_BYTES = 8 * 1024 * 1024; // 8MB — matches the bucket's own file_size_limit
+const RECEIPT_ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
+
 export async function uploadReceipt(ledgerId, expenseId, file) {
+  // The file picker's accept="image/*" is a UX hint only — anyone calling
+  // this function directly (or a modified client) could send anything.
+  // These checks are the real client-side gate; the receipts bucket's own
+  // file_size_limit/allowed_mime_types (see migration-receipt-limits.sql)
+  // is what actually enforces this, since a check here alone is still
+  // bypassable by whoever's calling the function.
+  if (file.size > RECEIPT_MAX_BYTES) {
+    throw new Error("That photo is too large — receipts are limited to 8MB.");
+  }
+  if (file.type && !RECEIPT_ALLOWED_TYPES.includes(file.type)) {
+    throw new Error("Receipts must be a photo (JPEG, PNG, WEBP, or HEIC).");
+  }
   const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
   const path = `${ledgerId}/${expenseId}-${Date.now().toString(36)}.${ext}`;
   const { error } = await supabase.storage.from("receipts").upload(path, file, { upsert: true });
