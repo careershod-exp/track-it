@@ -6,9 +6,44 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="theme-color" content="#1c2b22" />
     <title>Track It</title>
+    <style>
+      html, body {
+        margin: 0;
+        background: #16302A;
+      }
+      /* Matches App.jsx's appShell background exactly (same gradient,
+         same colors) so there's nothing to visually swap once React
+         mounts over this — this IS the app's real background, not an
+         approximation of it. */
+      #root {
+        min-height: 100vh;
+        background:
+          repeating-linear-gradient(0deg, rgba(201,162,39,0) 0px, rgba(201,162,39,0) 23px, rgba(201,162,39,0.05) 24px),
+          repeating-linear-gradient(90deg, rgba(201,162,39,0) 0px, rgba(201,162,39,0) 23px, rgba(201,162,39,0.05) 24px),
+          radial-gradient(1200px 600px at 20% -10%, #0F231F, #16302A);
+      }
+      /* A tiny static placeholder shown only until React's own first
+         render replaces it — same wordmark, same colors, so even the
+         instant before the real app mounts looks identical to it. This
+         is a real child of #root (not a ::before on #root itself), so
+         React's render() correctly clears it out automatically the
+         moment the real app mounts — nothing gets left behind. */
+      .tk-boot {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: 22px;
+        font-weight: 600;
+        color: #EDE6D3;
+        opacity: 0.9;
+        letter-spacing: 0.3px;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="tk-boot">Track It</div></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
