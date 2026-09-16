@@ -596,15 +596,34 @@ export default function App() {
   }, [session, mfaPending, mfaChecked]);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       setStorageStatus("checking");
+      // A brief network hiccup right as the app opens — a mobile radio
+      // waking from idle, a momentary edge blip — is common and usually
+      // resolves within a second or two. Previously, a single failed
+      // attempt went straight to the "can't reach the database" banner,
+      // which is exactly what a manual tap of "Retry" would have fixed a
+      // moment later anyway. One silent retry here absorbs that common
+      // case so users only ever see the banner for an actual, ongoing
+      // problem — not a transient blip that was already gone by the time
+      // they read the message.
       try {
         await withTimeout(pingDatabase(), 8000);
-        setStorageStatus("ok");
+        if (!cancelled) setStorageStatus("ok");
+        return;
       } catch {
-        setStorageStatus("broken");
+        // fall through to the retry below
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        await withTimeout(pingDatabase(), 6000);
+        if (!cancelled) setStorageStatus("ok");
+      } catch {
+        if (!cancelled) setStorageStatus("broken");
       }
     })();
+    return () => { cancelled = true; };
   }, [storageCheckNonce]);
 
   const activeProfile = demoProfile || profile;
@@ -697,8 +716,7 @@ export default function App() {
           <div style={styles.storageWarningBanner}>
             <AlertTriangle size={15} style={{ flexShrink: 0 }} />
             <span style={{ flex: 1 }}>
-              Can't reach the database right now — check that your Supabase project is running and that
-              VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY in .env are correct.
+              Can't reach the server right now. Check your internet connection and try again.
             </span>
             <button
               onClick={() => setStorageCheckNonce((n) => n + 1)}
