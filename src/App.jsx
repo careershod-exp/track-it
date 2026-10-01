@@ -318,7 +318,14 @@ function TLogo({ size = 20, color = "currentColor", ringColor, style }) {
 function Money({ amount, size = 13, color, style }) {
   const { code, symbol } = useContext(CurrencyContext);
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", lineHeight: 1, gap: 4, ...style }}>
+    // verticalAlign: "middle" matters specifically when Money sits inline
+    // mid-sentence in regular prose (e.g. "You've got <Money/> left over").
+    // inline-flex elements don't have a well-defined text baseline, so
+    // without this, browsers were dropping the whole amount visibly below
+    // the surrounding sentence's baseline. Standalone usages (stat pills,
+    // list rows) aren't affected either way, since there's no surrounding
+    // text line for vertical-align to matter against.
+    <span style={{ display: "inline-flex", alignItems: "center", verticalAlign: "middle", lineHeight: 1, gap: 4, ...style }}>
       {code === "AED" ? (
         <DirhamSymbol size={size} color={color} style={{ transform: "translateY(0.02em)" }} />
       ) : (
