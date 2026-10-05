@@ -2368,6 +2368,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   const [showAllExpenses, setShowAllExpenses] = useState(false);
   const [showAllIncome, setShowAllIncome] = useState(false);
   const [showAllPaymentMethods, setShowAllPaymentMethods] = useState(false);
+  const [showAllSavings, setShowAllSavings] = useState(false);
+  const [showAllLoans, setShowAllLoans] = useState(false);
   useEffect(() => { setShowAllExpenses(false); setShowAllIncome(false); }, [monthCursor, selectedDate, activeFilters, searchQuery]);
 
   // If someone navigates back further than the initial rolling window,
@@ -2448,6 +2450,13 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     return map;
   }, [loans, monthCursor]);
 
+  // Active loans first, paid-off ones last (otherwise unchanged order). With the
+  // list capped at 10 and loans stored oldest-first, a newly added loan could
+  // otherwise land past the cap and look like it hadn't saved.
+  const loansDisplayOrder = useMemo(
+    () => [...loans].sort((a, b) => (loanStatuses[a.id]?.isPaidOff ? 1 : 0) - (loanStatuses[b.id]?.isPaidOff ? 1 : 0)),
+    [loans, loanStatuses]
+  );
   const loansTakenTotal = useMemo(() => loans.filter((l) => l.direction === "taken").reduce((s, l) => s + (loanStatuses[l.id]?.remainingBalance ?? Number(l.principalAmount || 0)), 0), [loans, loanStatuses]);
   const loansGivenTotal = useMemo(() => loans.filter((l) => l.direction === "given").reduce((s, l) => s + (loanStatuses[l.id]?.remainingBalance ?? Number(l.principalAmount || 0)), 0), [loans, loanStatuses]);
 
@@ -3125,8 +3134,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
               alongside expenses — it's subtracted from Net. Taking money back out adds it back to Net.
             </p>
             {savings.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10, maxHeight: 160, overflowY: "auto" }}>
-                {savings.slice(0, 20).map((s) => (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
+                {(showAllSavings ? savings : savings.slice(0, 10)).map((s) => (
                   <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
                     <span style={{ flex: 1, opacity: 0.75 }}>
                       {fmtDate(s.date)} {s.note ? `· ${s.note}` : Number(s.amount) < 0 ? "· Taken from savings" : ""}
@@ -3147,6 +3156,18 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                     </button>
                   </div>
                 ))}
+                {savings.length > 10 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllSavings((v) => !v)}
+                    style={{
+                      width: "100%", textAlign: "center", padding: "8px 0 2px", fontSize: 12.5, fontWeight: 700,
+                      border: "none", background: "transparent", color: T.ink, opacity: 0.6, cursor: "pointer",
+                    }}
+                  >
+                    {showAllSavings ? "Show less" : `Show all ${savings.length}`}
+                  </button>
+                )}
               </div>
             )}
             <div style={{ display: "flex", gap: 8 }}>
@@ -3184,8 +3205,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
               loan folds its monthly repayment into every month's Net Balance automatically.
             </p>
             {loans.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10, maxHeight: 200, overflowY: "auto" }}>
-                {loans.map((l) => {
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+                {(showAllLoans ? loansDisplayOrder : loansDisplayOrder.slice(0, 10)).map((l) => {
                   const status = loanStatuses[l.id] || { remainingBalance: l.principalAmount, isPaidOff: false };
                   return (
                   <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 8, opacity: status.isPaidOff ? 0.55 : 1 }}>
@@ -3237,6 +3258,18 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                   </div>
                   );
                 })}
+                {loans.length > 10 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllLoans((v) => !v)}
+                    style={{
+                      width: "100%", textAlign: "center", padding: "8px 0 2px", fontSize: 12.5, fontWeight: 700,
+                      border: "none", background: "transparent", color: T.ink, opacity: 0.6, cursor: "pointer",
+                    }}
+                  >
+                    {showAllLoans ? "Show less" : `Show all ${loans.length}`}
+                  </button>
+                )}
               </div>
             )}
             <button type="button" style={{ ...styles.secondaryBtnSmall, width: "100%", justifyContent: "center" }} onClick={() => setLoanFormOpen("add")}>
