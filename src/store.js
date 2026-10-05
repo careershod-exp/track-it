@@ -5,11 +5,17 @@ import * as Sentry from "@sentry/react";
 // Client Keys (DSN), after creating a free account at sentry.io). Until
 // that's a real value, Sentry.init() is a harmless no-op — errors are
 // simply not captured yet, nothing else in the app is affected.
-Sentry.init({
-  dsn: "YOUR_SENTRY_DSN_HERE",
-  environment: import.meta.env.MODE, // "development" locally, "production" once deployed
-  tracesSampleRate: 0.1, // light performance sampling; raise later if useful
-});
+const SENTRY_DSN = "YOUR_SENTRY_DSN_HERE";
+// Only start Sentry once a real DSN (always starts with https://) has been
+// pasted in above — until then it's simply off, so the placeholder can never
+// cause noise or problems at app startup.
+if (SENTRY_DSN.startsWith("https://")) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    environment: import.meta.env.MODE, // "development" locally, "production" once deployed
+    tracesSampleRate: 0.1, // light performance sampling; raise later if useful
+  });
+}
 
 // Reports a genuine unexpected error (a failed database call, a broken
 // upload, etc.) to Sentry before it's thrown onward for the UI to show
