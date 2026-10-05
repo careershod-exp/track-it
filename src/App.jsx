@@ -58,7 +58,17 @@ const T = {
 // the live site, it takes effect for everyone without a Play Store update.
 const RECEIPTS_ENABLED = true;
 
-const CATEGORY_PALETTE = ["#C9A227", "#A63446", "#5E8C61", "#3E6B5C", "#6B4C7A", "#2F6E73"];
+// 22 hand-checked colours, each clearly distinct from every other (measured,
+// not eyeballed). The first 12 line up with the 12 default categories, so no
+// two default categories ever share a colour; the rest are for custom
+// categories. These must stay hex values — some places append alpha digits
+// to them (e.g. `${color}22`), which doesn't work with hsl()/rgb() strings.
+const CATEGORY_PALETTE = [
+  "#C9A227", "#5E8C61", "#3B7EA1", "#A63446", "#E07B39", "#7B5EA7",
+  "#2FA39A", "#D4628C", "#2D4A7A", "#9AB33C", "#8C5A3C", "#8A8A82",
+  "#4EBC64", "#BC4EBC", "#AC9C5D", "#793E5C", "#4E4EBC", "#6C8532",
+  "#85327D", "#4EBC90", "#32853B", "#4E7ABC",
+];
 
 const DEFAULT_CATEGORIES = [
   { name: "Food & Drink", icon: Utensils },
@@ -345,7 +355,24 @@ function Money({ amount, size = 13, color, style }) {
 }
 
 function catColor(index) {
-  return CATEGORY_PALETTE[index % CATEGORY_PALETTE.length];
+  if (index < CATEGORY_PALETTE.length) return CATEGORY_PALETTE[index];
+  // Past the 22 hand-picked colours (someone with a lot of custom
+  // categories): keep generating new ones instead of wrapping back to the
+  // start, which is what made different categories share a colour before.
+  // Hue steps by the golden angle so neighbours stay well apart; returned
+  // as hex, not hsl(), because callers append alpha digits to it.
+  const h = (((index - CATEGORY_PALETTE.length) * 137.508 + 20) % 360) / 360;
+  const s = 0.45, l = 0.45;
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const hue = (t) => {
+    t = (t + 1) % 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  const hex = (v) => Math.round(v * 255).toString(16).padStart(2, "0");
+  return `#${hex(hue(h + 1 / 3))}${hex(hue(h))}${hex(hue(h - 1 / 3))}`.toUpperCase();
 }
 
 // Picks a small icon based on keywords in the nickname, so "Amex", "Credit
@@ -3004,7 +3031,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
               {breakdown.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={breakdown} dataKey="value" nameKey="name" innerRadius={36} outerRadius={60} paddingAngle={2}>
+                    <Pie data={breakdown} dataKey="value" nameKey="name" innerRadius={36} outerRadius={60} paddingAngle={0}>
                       {breakdown.map((entry, i) => <Cell key={i} fill={entry.color} stroke="none" />)}
                     </Pie>
                     <Tooltip content={<ChartTooltip formatter={fmtMoneyLocal} />} />
@@ -3230,7 +3257,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                 {paymentBreakdown.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie data={paymentBreakdown} dataKey="value" nameKey="name" innerRadius={28} outerRadius={46} paddingAngle={2}>
+                      <Pie data={paymentBreakdown} dataKey="value" nameKey="name" innerRadius={28} outerRadius={46} paddingAngle={0}>
                         {paymentBreakdown.map((entry, i) => <Cell key={i} fill={entry.color} stroke="none" />)}
                       </Pie>
                       <Tooltip content={<ChartTooltip formatter={fmtMoneyLocal} />} />
