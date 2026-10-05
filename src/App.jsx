@@ -50,6 +50,14 @@ const T = {
   sage: "#5E8C61",
 };
 
+// Master switch for *adding new* receipt photos. Receipts live in Supabase
+// Storage, which has a hard total cap on the free plan, so this exists to be
+// flipped to false if usage ever gets close to it. Turning it off only stops
+// new uploads — existing receipts can still be viewed, and removed (which
+// frees space back up). Flip it here and push; with the Android app loading
+// the live site, it takes effect for everyone without a Play Store update.
+const RECEIPTS_ENABLED = true;
+
 const CATEGORY_PALETTE = ["#C9A227", "#A63446", "#5E8C61", "#3E6B5C", "#6B4C7A", "#2F6E73"];
 
 const DEFAULT_CATEGORIES = [
@@ -3721,7 +3729,7 @@ function ExpenseForm({ categories, paymentMethods, initial, isOnline, isEditing,
   const handleReceiptChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 8 * 1024 * 1024) return setErr("That photo is too large — please pick one under 8MB.");
+    if (file.size > 5 * 1024 * 1024) return setErr("That photo is too large — please pick one under 5MB.");
     setReceiptFile(file);
     setReceiptPreviewName(file.name);
     setRemoveReceipt(false);
@@ -3860,7 +3868,7 @@ function ExpenseForm({ categories, paymentMethods, initial, isOnline, isEditing,
                 </span>
                 <button type="button" style={styles.secondaryBtnSmall} onClick={() => setRemoveReceipt(true)}>Remove</button>
               </div>
-            ) : (
+            ) : RECEIPTS_ENABLED ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <label style={{ ...styles.secondaryBtnSmall, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
                   <Camera size={14} />
@@ -3873,6 +3881,10 @@ function ExpenseForm({ categories, paymentMethods, initial, isOnline, isEditing,
                   </button>
                 )}
               </div>
+            ) : (
+              <p style={{ fontSize: 12.5, opacity: 0.6, margin: 0 }}>
+                Adding new receipt photos is paused for now. Your expense will still save.
+              </p>
             )}
           </>
         ) : (

@@ -1,4 +1,28 @@
 import { supabase } from "./supabaseClient";
+import * as Sentry from "@sentry/react";
+
+// Replace with your actual Sentry DSN (Settings → Projects → your project →
+// Client Keys (DSN), after creating a free account at sentry.io). Until
+// that's a real value, Sentry.init() is a harmless no-op — errors are
+// simply not captured yet, nothing else in the app is affected.
+Sentry.init({
+  dsn: "YOUR_SENTRY_DSN_HERE",
+  environment: import.meta.env.MODE, // "development" locally, "production" once deployed
+  tracesSampleRate: 0.1, // light performance sampling; raise later if useful
+});
+
+// Reports a genuine unexpected error (a failed database call, a broken
+// upload, etc.) to Sentry before it's thrown onward for the UI to show
+// a friendly message. Deliberately NOT used for expected, user-facing
+// validation (wrong file type, already-invited, rate limits) — only for
+// things that indicate something actually went wrong.
+function reportError(error, context) {
+  try {
+    Sentry.captureException(error, context ? { extra: { context } } : undefined);
+  } catch {
+    // Never let error *reporting* itself break the app.
+  }
+}
 
 /* ---------------------------------------------------------------
    Thin data-access layer. Every function here does exactly one
@@ -14,7 +38,7 @@ import { supabase } from "./supabaseClient";
 
 export async function pingDatabase() {
   const { error } = await supabase.from("ledgers").select("id").limit(1);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return true;
 }
 
@@ -97,7 +121,7 @@ export async function fetchUserLedgers(userId) {
     .select("ledger_id, created_at, ledgers ( id, name )")
     .eq("user_id", userId)
     .order("created_at", { ascending: true });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return (data || [])
     .filter((row) => row.ledgers)
     .map((row) => ({ id: row.ledgers.id, name: row.ledgers.name }));
@@ -133,7 +157,7 @@ export async function createLedger(userId, name, displayName) {
 // migration-ledger-ownership-lockdown.sql.
 export async function updateLedgerName(ledgerId, name) {
   const { error } = await supabase.rpc("rename_ledger", { p_ledger_id: ledgerId, p_new_name: name });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 export async function fetchLedgerData(ledgerId) {
@@ -142,7 +166,7 @@ export async function fetchLedgerData(ledgerId) {
     .select("categories,budgets,payment_methods,currency")
     .eq("id", ledgerId)
     .single();
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return {
     categories: data?.categories || [],
     budgets: data?.budgets || { overall: null, categories: {} },
@@ -153,12 +177,12 @@ export async function fetchLedgerData(ledgerId) {
 
 export async function saveCategoriesRemote(ledgerId, categories) {
   const { error } = await supabase.from("ledgers").update({ categories }).eq("id", ledgerId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 export async function saveBudgetsRemote(ledgerId, budgets) {
   const { error } = await supabase.from("ledgers").update({ budgets }).eq("id", ledgerId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 // Budget version history — lets a budget change apply from the current
@@ -172,7 +196,7 @@ export async function fetchBudgetVersions(ledgerId) {
     .select("effective_from,overall,categories")
     .eq("ledger_id", ledgerId)
     .order("effective_from", { ascending: true });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return data || [];
 }
 
@@ -188,12 +212,12 @@ export async function saveBudgetVersion(ledgerId, effectiveFrom, budgets) {
       },
       { onConflict: "ledger_id,effective_from" }
     );
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 export async function savePaymentMethodsRemote(ledgerId, paymentMethods) {
   const { error } = await supabase.from("ledgers").update({ payment_methods: paymentMethods }).eq("id", ledgerId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 // sinceDate (optional, "YYYY-MM-DD"): limits results to on/after this date.
@@ -210,7 +234,7 @@ export async function fetchExpenses(ledgerId, sinceDate) {
   const { data, error } = await query
     .order("date", { ascending: false })
     .order("created_at", { ascending: false });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return (data || []).map((row) => ({
     id: row.id,
     amount: Number(row.amount),
@@ -235,7 +259,7 @@ export async function fetchExpensesForMonth(ledgerId, monthStartDate, monthEndDa
     .lt("date", monthEndDate)
     .order("date", { ascending: false })
     .order("created_at", { ascending: false });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return (data || []).map((row) => ({
     id: row.id,
     amount: Number(row.amount),
@@ -266,7 +290,7 @@ export async function insertExpenseRemote(ledgerId, addedBy, expense) {
     })
     .select("id,date,category,note,amount,created_at,added_by,payment_method,receipt_path")
     .single();
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return {
     id: data.id,
     amount: Number(data.amount),
@@ -292,12 +316,12 @@ export async function updateExpenseRemote(expenseId, patch) {
       ...(patch.receiptPath !== undefined ? { receipt_path: patch.receiptPath || null } : {}),
     })
     .eq("id", expenseId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 export async function deleteExpenseRemote(expenseId) {
   const { error } = await supabase.from("expenses").delete().eq("id", expenseId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 export async function fetchMembers(ledgerId) {
@@ -306,7 +330,7 @@ export async function fetchMembers(ledgerId) {
     .select("user_id,display_name,role,created_at")
     .eq("ledger_id", ledgerId)
     .order("created_at", { ascending: true });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return data || [];
 }
 
@@ -316,7 +340,7 @@ export async function fetchPendingInvites(ledgerId) {
     .select("id,email,created_at")
     .eq("ledger_id", ledgerId)
     .order("created_at", { ascending: true });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return data || [];
 }
 
@@ -332,13 +356,14 @@ export async function inviteMember(ledgerId, invitedBy, email) {
     // migration-invite-rate-limit.sql) — surface its own message as-is
     // rather than a raw Postgres error code.
     if (error.code === "P0001") throw new Error(error.message);
+    reportError(error, "inviteMember");
     throw error;
   }
 }
 
 export async function cancelInvite(inviteId) {
   const { error } = await supabase.from("ledger_invites").delete().eq("id", inviteId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 /* ---------------------------------------------------------------
@@ -353,7 +378,7 @@ export async function fetchIncome(ledgerId, sinceDate) {
   const { data, error } = await query
     .order("date", { ascending: false })
     .order("created_at", { ascending: false });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return (data || []).map((row) => ({
     id: row.id,
     amount: Number(row.amount),
@@ -374,7 +399,7 @@ export async function fetchIncomeForMonth(ledgerId, monthStartDate, monthEndDate
     .lt("date", monthEndDate)
     .order("date", { ascending: false })
     .order("created_at", { ascending: false });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return (data || []).map((row) => ({
     id: row.id,
     amount: Number(row.amount),
@@ -399,7 +424,7 @@ export async function insertIncomeRemote(ledgerId, addedBy, entry) {
     })
     .select("id,date,source,note,amount,created_at,added_by")
     .single();
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return {
     id: data.id,
     amount: Number(data.amount),
@@ -413,7 +438,7 @@ export async function insertIncomeRemote(ledgerId, addedBy, entry) {
 
 export async function deleteIncomeRemote(incomeId) {
   const { error } = await supabase.from("income").delete().eq("id", incomeId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 /* ---------------------------------------------------------------
@@ -425,7 +450,7 @@ export async function fetchRecurringExpenses(ledgerId) {
     .select("id,category,note,amount,payment_method,day_of_month,last_generated_month")
     .eq("ledger_id", ledgerId)
     .order("created_at", { ascending: true });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return (data || []).map((row) => ({
     id: row.id,
     category: row.category,
@@ -451,7 +476,7 @@ export async function createRecurringExpense(ledgerId, createdBy, template) {
     })
     .select("id,category,note,amount,payment_method,day_of_month,last_generated_month")
     .single();
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return {
     id: data.id,
     category: data.category,
@@ -465,7 +490,7 @@ export async function createRecurringExpense(ledgerId, createdBy, template) {
 
 export async function deleteRecurringExpense(recurringId) {
   const { error } = await supabase.from("recurring_expenses").delete().eq("id", recurringId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 export async function markRecurringGenerated(recurringId, monthStr) {
@@ -473,7 +498,7 @@ export async function markRecurringGenerated(recurringId, monthStr) {
     .from("recurring_expenses")
     .update({ last_generated_month: monthStr })
     .eq("id", recurringId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 /* ---------------------------------------------------------------
@@ -485,7 +510,7 @@ export async function logActivity(ledgerId, userId, displayName, detail) {
   const { error } = await supabase.from("activity_log").insert({
     ledger_id: ledgerId, user_id: userId, display_name: displayName, detail,
   });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 export async function fetchActivityLog(ledgerId) {
@@ -495,7 +520,7 @@ export async function fetchActivityLog(ledgerId) {
     .eq("ledger_id", ledgerId)
     .order("created_at", { ascending: false })
     .limit(100);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return (data || []).map((row) => ({
     id: row.id,
     displayName: row.display_name,
@@ -509,13 +534,13 @@ export async function fetchActivityLog(ledgerId) {
 ------------------------------------------------------------------ */
 export async function saveCurrencyRemote(ledgerId, currencyCode) {
   const { error } = await supabase.from("ledgers").update({ currency: currencyCode }).eq("id", ledgerId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 /* ---------------------------------------------------------------
    Receipt photos
 ------------------------------------------------------------------ */
-const RECEIPT_MAX_BYTES = 8 * 1024 * 1024; // 8MB — matches the bucket's own file_size_limit
+const RECEIPT_MAX_BYTES = 5 * 1024 * 1024; // 5MB — matches the bucket's own file_size_limit
 const RECEIPT_ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 
 export async function uploadReceipt(ledgerId, expenseId, file) {
@@ -526,7 +551,7 @@ export async function uploadReceipt(ledgerId, expenseId, file) {
   // is what actually enforces this, since a check here alone is still
   // bypassable by whoever's calling the function.
   if (file.size > RECEIPT_MAX_BYTES) {
-    throw new Error("That photo is too large — receipts are limited to 8MB.");
+    throw new Error("That photo is too large — receipts are limited to 5MB.");
   }
   if (file.type && !RECEIPT_ALLOWED_TYPES.includes(file.type)) {
     throw new Error("Receipts must be a photo (JPEG, PNG, WEBP, or HEIC).");
@@ -534,19 +559,19 @@ export async function uploadReceipt(ledgerId, expenseId, file) {
   const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
   const path = `${ledgerId}/${expenseId}-${Date.now().toString(36)}.${ext}`;
   const { error } = await supabase.storage.from("receipts").upload(path, file, { upsert: true });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return path;
 }
 
 export async function getReceiptUrl(path) {
   const { data, error } = await supabase.storage.from("receipts").createSignedUrl(path, 3600);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return data.signedUrl;
 }
 
 export async function deleteReceipt(path) {
   const { error } = await supabase.storage.from("receipts").remove([path]);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 /* ---------------------------------------------------------------
@@ -554,7 +579,7 @@ export async function deleteReceipt(path) {
 ------------------------------------------------------------------ */
 export async function deleteLedger(ledgerId) {
   const { error } = await supabase.from("ledgers").delete().eq("id", ledgerId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 export async function updateMemberDisplayName(ledgerId, userId, displayName) {
@@ -563,7 +588,7 @@ export async function updateMemberDisplayName(ledgerId, userId, displayName) {
     .update({ display_name: displayName })
     .eq("ledger_id", ledgerId)
     .eq("user_id", userId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 /* ---------------------------------------------------------------
@@ -576,7 +601,7 @@ export async function fetchSavings(ledgerId) {
     .eq("ledger_id", ledgerId)
     .order("date", { ascending: false })
     .order("created_at", { ascending: false });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return (data || []).map((row) => ({
     id: row.id,
     amount: Number(row.amount),
@@ -599,7 +624,7 @@ export async function insertSavingsRemote(ledgerId, addedBy, entry) {
     })
     .select("id,date,note,amount,created_at,added_by")
     .single();
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return {
     id: data.id,
     amount: Number(data.amount),
@@ -612,7 +637,7 @@ export async function insertSavingsRemote(ledgerId, addedBy, entry) {
 
 export async function deleteSavingsRemote(savingsId) {
   const { error } = await supabase.from("savings").delete().eq("id", savingsId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 /* ---------------------------------------------------------------
@@ -624,7 +649,7 @@ export async function fetchRecurringIncome(ledgerId) {
     .select("id,source,note,amount,day_of_month,last_generated_month")
     .eq("ledger_id", ledgerId)
     .order("created_at", { ascending: true });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return (data || []).map((row) => ({
     id: row.id,
     source: row.source,
@@ -648,7 +673,7 @@ export async function createRecurringIncome(ledgerId, createdBy, template) {
     })
     .select("id,source,note,amount,day_of_month,last_generated_month")
     .single();
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return {
     id: data.id,
     source: data.source,
@@ -661,7 +686,7 @@ export async function createRecurringIncome(ledgerId, createdBy, template) {
 
 export async function deleteRecurringIncome(recurringId) {
   const { error } = await supabase.from("recurring_income").delete().eq("id", recurringId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 export async function markRecurringIncomeGenerated(recurringId, monthStr) {
@@ -669,7 +694,7 @@ export async function markRecurringIncomeGenerated(recurringId, monthStr) {
     .from("recurring_income")
     .update({ last_generated_month: monthStr })
     .eq("id", recurringId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 /* ---------------------------------------------------------------
@@ -681,7 +706,7 @@ export async function fetchCardReminders(ledgerId) {
     .select("id,card_name,due_day,note,last_notified_month")
     .eq("ledger_id", ledgerId)
     .order("created_at", { ascending: true });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return (data || []).map((row) => ({
     id: row.id,
     cardName: row.card_name,
@@ -703,7 +728,7 @@ export async function createCardReminder(ledgerId, createdBy, reminder) {
     })
     .select("id,card_name,due_day,note,last_notified_month")
     .single();
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return {
     id: data.id,
     cardName: data.card_name,
@@ -715,7 +740,7 @@ export async function createCardReminder(ledgerId, createdBy, reminder) {
 
 export async function deleteCardReminder(reminderId) {
   const { error } = await supabase.from("card_reminders").delete().eq("id", reminderId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 export async function markCardReminderNotified(reminderId, monthStr) {
@@ -723,7 +748,7 @@ export async function markCardReminderNotified(reminderId, monthStr) {
     .from("card_reminders")
     .update({ last_notified_month: monthStr })
     .eq("id", reminderId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 /* ---------------------------------------------------------------
@@ -736,7 +761,7 @@ export async function fetchNotifications(ledgerId) {
     .eq("ledger_id", ledgerId)
     .order("created_at", { ascending: false })
     .limit(15);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return (data || []).map((row) => ({
     id: row.id,
     message: row.message,
@@ -752,7 +777,7 @@ export async function insertNotification(ledgerId, message, type = "card_due") {
     .insert({ ledger_id: ledgerId, message, type })
     .select("id,message,type,read,created_at")
     .single();
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   // Enforce the 15-item cap — delete anything past the 15 most recent for
   // this ledger, so the list never grows without bound.
   const { data: overflow } = await supabase
@@ -775,7 +800,7 @@ export async function insertNotification(ledgerId, message, type = "card_due") {
 
 export async function markNotificationsRead(ledgerId) {
   const { error } = await supabase.from("notifications").update({ read: true }).eq("ledger_id", ledgerId).eq("read", false);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 /* ---------------------------------------------------------------
@@ -786,7 +811,7 @@ export async function updateSavingsRemote(savingsId, patch) {
     .from("savings")
     .update({ date: patch.date, note: patch.note || null, amount: patch.amount })
     .eq("id", savingsId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 /* ---------------------------------------------------------------
@@ -817,7 +842,7 @@ export async function fetchLoans(ledgerId) {
     .select(LOAN_FIELDS)
     .eq("ledger_id", ledgerId)
     .order("created_at", { ascending: true });
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return (data || []).map(mapLoanRow);
 }
 
@@ -838,7 +863,7 @@ export async function createLoan(ledgerId, createdBy, loan) {
     })
     .select(LOAN_FIELDS)
     .single();
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
   return mapLoanRow(data);
 }
 
@@ -856,7 +881,7 @@ export async function updateLoan(loanId, loan) {
       note: loan.note || null,
     })
     .eq("id", loanId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 // A standalone correction to what's actually still owed — for a missed
@@ -867,12 +892,12 @@ export async function updateLoanBalance(loanId, amount, date) {
     .from("loans")
     .update({ balance_override_amount: amount, balance_override_date: date })
     .eq("id", loanId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 export async function deleteLoan(loanId) {
   const { error } = await supabase.from("loans").delete().eq("id", loanId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
 
 /* ---------------------------------------------------------------
@@ -883,5 +908,5 @@ export async function updateIncomeRemote(incomeId, patch) {
     .from("income")
     .update({ date: patch.date, source: patch.source, note: patch.note || null, amount: patch.amount })
     .eq("id", incomeId);
-  if (error) throw error;
+  if (error) { reportError(error); throw error; }
 }
