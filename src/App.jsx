@@ -2741,7 +2741,10 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       <header style={styles.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <TLogo size={20} color={T.gold} />
-          <h1 style={styles.wordmarkSmall}>Track It</h1>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <h1 style={styles.wordmarkSmall}>Track It</h1>
+            <span style={styles.byline}>by Denin</span>
+          </div>
         </div>
         <div style={styles.headerToolbar}>
           {!profile.isDemo && ledgerList && ledgerList.length > 0 ? (
@@ -6506,6 +6509,7 @@ const styles = {
   },
   wordmark: { fontFamily: "'Fraunces', serif", fontSize: 30, margin: 0, color: T.ink, letterSpacing: 0.3 },
   wordmarkSmall: { fontFamily: "'Fraunces', serif", fontSize: 19, margin: 0, color: T.parchment },
+  byline: { fontFamily: "'Parisienne', cursive", fontSize: 15.5, lineHeight: 1, marginTop: 1, color: T.gold, whiteSpace: "nowrap" },
   tagline: { margin: "4px 0 0", fontSize: 13, opacity: 0.55, fontStyle: "italic" },
   emptyNote: { textAlign: "center", opacity: 0.6, fontSize: 14, marginBottom: 16 },
   profileRow: {
@@ -6726,7 +6730,7 @@ const styles = {
 };
 
 const GLOBAL_CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Parisienne&display=swap');
 
 * { box-sizing: border-box; }
 html, body { margin: 0; overflow-x: hidden; max-width: 100%; }
