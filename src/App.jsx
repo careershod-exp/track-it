@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useContext } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useContext, useRef } from "react";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Legend,
@@ -90,20 +90,73 @@ const MONTHS = ["January","February","March","April","May","June","July","August
 const SUGGESTED_PAYMENT_METHODS = ["Cash", "Credit card 1", "Credit card 2", "Debit card", "Bank transfer"];
 const SUGGESTED_INCOME_SOURCES = ["Salary", "Freelance", "Gift", "Interest", "Refund", "Other"];
 
-const CURRENCIES = [
-  { code: "AED", symbol: "AED", name: "UAE Dirham" },
-  { code: "USD", symbol: "$", name: "US Dollar" },
-  { code: "EUR", symbol: "€", name: "Euro" },
-  { code: "GBP", symbol: "£", name: "British Pound" },
-  { code: "INR", symbol: "₹", name: "Indian Rupee" },
-  { code: "PKR", symbol: "Rs", name: "Pakistani Rupee" },
-  { code: "SAR", symbol: "SAR", name: "Saudi Riyal" },
-  { code: "CAD", symbol: "CA$", name: "Canadian Dollar" },
-  { code: "AUD", symbol: "A$", name: "Australian Dollar" },
-  { code: "JPY", symbol: "¥", name: "Japanese Yen" },
-  { code: "CNY", symbol: "¥", name: "Chinese Yuan" },
-  { code: "ZAR", symbol: "R", name: "South African Rand" },
+// Shown first, in this order, because they're the currencies most of this
+// app's users are expected to want (UAE, India, US, the Gulf states, the
+// Philippines, Pakistan, China, Japan). Everything else follows alphabetically.
+const FEATURED_CURRENCY_CODES = [
+  "AED", "INR", "USD", "QAR", "OMR", "KWD", "SAR", "BHD", "PHP", "PKR", "CNY", "JPY",
 ];
+
+// Every currently-active ISO 4217 currency, so nobody is locked out of using
+// the app because their currency isn't listed. Currencies that have been
+// retired (e.g. the Croatian kuna, the Bulgarian lev since the euro replaced
+// it) are deliberately left out.
+const ALL_CURRENCY_CODES = [
+  "AED", "AFN", "ALL", "AMD", "AOA", "ARS", "AUD", "AWG", "AZN", "BAM", "BBD",
+  "BDT", "BHD", "BIF", "BMD", "BND", "BOB", "BRL", "BSD", "BTN", "BWP", "BYN",
+  "BZD", "CAD", "CDF", "CHF", "CLP", "CNY", "COP", "CRC", "CUP", "CVE", "CZK",
+  "DJF", "DKK", "DOP", "DZD", "EGP", "ERN", "ETB", "EUR", "FJD", "FKP", "GBP",
+  "GEL", "GHS", "GIP", "GMD", "GNF", "GTQ", "GYD", "HKD", "HNL", "HTG", "HUF",
+  "IDR", "ILS", "INR", "IQD", "IRR", "ISK", "JMD", "JOD", "JPY", "KES", "KGS",
+  "KHR", "KMF", "KPW", "KRW", "KWD", "KYD", "KZT", "LAK", "LBP", "LKR", "LRD",
+  "LSL", "LYD", "MAD", "MDL", "MGA", "MKD", "MMK", "MNT", "MOP", "MRU", "MUR",
+  "MVR", "MWK", "MXN", "MYR", "MZN", "NAD", "NGN", "NIO", "NOK", "NPR", "NZD",
+  "OMR", "PAB", "PEN", "PGK", "PHP", "PKR", "PLN", "PYG", "QAR", "RON", "RSD",
+  "RUB", "RWF", "SAR", "SBD", "SCR", "SDG", "SEK", "SGD", "SHP", "SLE", "SOS",
+  "SRD", "SSP", "STN", "SVC", "SYP", "SZL", "THB", "TJS", "TMT", "TND", "TOP",
+  "TRY", "TTD", "TWD", "TZS", "UAH", "UGX", "USD", "UYU", "UZS", "VES", "VND",
+  "VUV", "WST", "XAF", "XCD", "XCG", "XOF", "XPF", "YER", "ZAR", "ZMW", "ZWG",
+];
+
+// Names and symbols are worked out from the browser's own currency data
+// rather than typed out by hand, so there are no spelling slips. The few
+// below differ from what the browser would produce on its own; they're kept
+// exactly as this app has always shown them, so nobody who already chose one
+// of these sees their currency change appearance.
+const CURRENCY_OVERRIDES = {
+  AED: { symbol: "AED", name: "UAE Dirham" },
+  PKR: { symbol: "Rs", name: "Pakistani Rupee" },
+  CNY: { symbol: "¥", name: "Chinese Yuan" },
+  ZAR: { symbol: "R", name: "South African Rand" },
+};
+
+function currencyNameFor(code) {
+  try { return new Intl.DisplayNames(["en"], { type: "currency" }).of(code) || code; } catch { return code; }
+}
+function currencySymbolFor(code) {
+  // The "en" locale gives a symbol that tells similar currencies apart
+  // (MX$, NZ$, HK$, R$ ...) and falls back to the code itself (CHF, KWD ...)
+  // where there's no common symbol.
+  try {
+    const part = new Intl.NumberFormat("en", { style: "currency", currency: code })
+      .formatToParts(0).find((p) => p.type === "currency");
+    return part?.value || code;
+  } catch { return code; }
+}
+
+const CURRENCIES = (() => {
+  const make = (code) => ({
+    code,
+    symbol: CURRENCY_OVERRIDES[code]?.symbol ?? currencySymbolFor(code),
+    name: CURRENCY_OVERRIDES[code]?.name ?? currencyNameFor(code),
+  });
+  const featured = FEATURED_CURRENCY_CODES.map(make);
+  const rest = ALL_CURRENCY_CODES
+    .filter((code) => !FEATURED_CURRENCY_CODES.includes(code))
+    .map(make)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return [...featured, ...rest];
+})();
 
 const CurrencyContext = React.createContext({ code: "AED", symbol: "AED" });
 
@@ -5576,6 +5629,87 @@ function TwoFactorSection() {
   );
 }
 
+// Searchable currency chooser — with ~150 currencies, a plain dropdown is
+// unusable on a phone, so this filters as you type by name, code or symbol.
+function CurrencyPicker({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const panelRef = useRef(null);
+  const current = CURRENCIES.find((c) => c.code === value);
+  const q = query.trim().toLowerCase();
+  const matches = q
+    ? CURRENCIES.filter((c) => c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q) || c.symbol.toLowerCase().includes(q))
+    : CURRENCIES;
+
+  useEffect(() => {
+    if (open) panelRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [open]);
+
+  const choose = (code) => {
+    onChange(code);
+    setOpen(false);
+    setQuery("");
+  };
+
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        style={{ ...styles.select, display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", textAlign: "left", cursor: "pointer" }}
+      >
+        <span>{value}{current ? ` — ${current.name}` : ""}</span>
+        <ChevronDown size={16} style={{ opacity: 0.6, transform: open ? "rotate(180deg)" : "none" }} />
+      </button>
+      {open && (
+        <div ref={panelRef} style={{ marginTop: 6, border: `1px solid ${T.parchmentDim}`, borderRadius: 10, background: "#fff", overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: `1px solid ${T.parchmentDim}` }}>
+            <Search size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            <input
+              type="text"
+              autoFocus
+              autoComplete="off"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); if (matches[0]) choose(matches[0].code); }
+              }}
+              placeholder="Search by name, code or symbol"
+              style={{ flex: 1, minWidth: 0, border: "none", outline: "none", background: "transparent", fontSize: 14.5, color: T.ink }}
+            />
+          </div>
+          <div role="listbox" style={{ maxHeight: 220, overflowY: "auto" }}>
+            {matches.length === 0 ? (
+              <div style={{ padding: "14px 12px", fontSize: 13.5, opacity: 0.6 }}>No currency matches "{query}"</div>
+            ) : (
+              matches.map((c) => (
+                <button
+                  key={c.code}
+                  type="button"
+                  role="option"
+                  aria-selected={c.code === value}
+                  onClick={() => choose(c.code)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
+                    padding: "10px 12px", border: "none", cursor: "pointer", fontSize: 14, color: T.ink,
+                    background: c.code === value ? T.parchmentDim : "transparent",
+                  }}
+                >
+                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, width: 42, flexShrink: 0 }}>{c.code}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>{c.name}</span>
+                  <span style={{ opacity: 0.55, flexShrink: 0 }}>{c.symbol}</span>
+                  {c.code === value && <Check size={14} style={{ flexShrink: 0 }} />}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsModal({ userEmail, ledgerName, currency, onChangeCurrency, onClose }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -5630,9 +5764,7 @@ function SettingsModal({ userEmail, ledgerName, currency, onChangeCurrency, onCl
         <div style={styles.settingsReadonlyField}>{ledgerName}</div>
 
         <label style={styles.label}>Currency</label>
-        <select style={styles.select} value={currency} onChange={(e) => onChangeCurrency(e.target.value)}>
-          {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
-        </select>
+        <CurrencyPicker value={currency} onChange={onChangeCurrency} />
 
         <TwoFactorSection />
 
