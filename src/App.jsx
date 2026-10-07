@@ -860,13 +860,28 @@ export default function App() {
   );
 }
 
+// A spending line draws itself across, with a dot following its tip. Used on
+// both loading screens so the animation carries on seamlessly from one to the
+// next. Pure CSS/SVG (see .tk-line in the global styles) — no images, no libraries.
+function LiveLineLoader({ caption = "Tracking…" }) {
+  return (
+    <div role="status" aria-label="Loading" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+      <svg viewBox="0 0 190 90" width="190" height="90" style={{ overflow: "visible" }}>
+        <path d="M8 82 H182" stroke="rgba(237,230,211,.3)" strokeWidth="2" fill="none" />
+        <polyline className="tk-line" pathLength="100" points="8,66 34,52 56,60 84,30 108,40 140,12 176,22" />
+        <circle className="tk-line-dot" r="5" cx="0" cy="0" />
+      </svg>
+      <div style={{ fontFamily: "'Fraunces', serif", fontSize: 14, opacity: 0.8, letterSpacing: 0.4, marginTop: 6 }}>
+        {caption}
+      </div>
+    </div>
+  );
+}
+
 function BootScreen() {
   return (
     <div style={{ ...styles.centerFill, color: T.parchment }}>
-      <TLogo size={26} color={T.parchment} style={{ opacity: 0.6 }} />
-      <div style={{ fontFamily: "'Fraunces', serif", fontSize: 18, marginTop: 10, letterSpacing: 0.5 }}>
-        Opening Track It…
-      </div>
+      <LiveLineLoader />
     </div>
   );
 }
@@ -2732,7 +2747,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   };
 
   if (expenses === null) {
-    return <div style={{ ...styles.centerFill, color: T.parchment }}>Loading your tracker…</div>;
+    return <div style={{ ...styles.centerFill, color: T.parchment }}><LiveLineLoader /></div>;
   }
 
   return (
@@ -6775,6 +6790,36 @@ button { font-family: inherit; }
 .row-icon-hover:hover {
   background: rgba(27,42,36,0.08);
   opacity: 0.9 !important;
+}
+
+/* Startup "live line" loader (index.html carries an identical copy, so the
+   animation can show before this app has even loaded). */
+.tk-line {
+  fill: none; stroke: #C9A227; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 100; stroke-dashoffset: 100; animation: tkLineDraw 3s linear infinite;
+}
+.tk-line-dot { fill: #EDE6D3; animation: tkLineDot 3s linear infinite; }
+@keyframes tkLineDraw {
+  0% { stroke-dashoffset: 100; opacity: 1; }
+  70%, 88% { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes tkLineDot {
+  0%{transform:translate(8px,66px);opacity:1}
+  10.3%{transform:translate(34px,52px);opacity:1}
+  18.5%{transform:translate(56px,60px);opacity:1}
+  32.9%{transform:translate(84px,30px);opacity:1}
+  42.0%{transform:translate(108px,40px);opacity:1}
+  56.9%{transform:translate(140px,12px);opacity:1}
+  70.0%{transform:translate(176px,22px);opacity:1}
+  88%{transform:translate(176px,22px);opacity:1}
+  100%{transform:translate(176px,22px);opacity:0}
+}
+/* Reduced motion switches animations off above, which would leave the line
+   undrawn — so show it complete instead. */
+@media (prefers-reduced-motion: reduce) {
+  .tk-line { stroke-dashoffset: 0 !important; }
+  .tk-line-dot { transform: translate(176px, 22px); }
 }
 
 @keyframes printIn {

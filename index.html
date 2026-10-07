@@ -22,28 +22,30 @@
           repeating-linear-gradient(90deg, rgba(201,162,39,0) 0px, rgba(201,162,39,0) 23px, rgba(201,162,39,0.05) 24px),
           radial-gradient(1200px 600px at 20% -10%, #0F231F, #16302A);
       }
-      /* A tiny static placeholder shown only until React's own first
-         render replaces it — same wordmark, same colors, so even the
-         instant before the real app mounts looks identical to it. This
-         is a real child of #root (not a ::before on #root itself), so
-         React's render() correctly clears it out automatically the
-         moment the real app mounts — nothing gets left behind. */
+      /* The "live line" loader, shown from the very first paint until React
+         replaces it. The app carries an identical copy (LiveLineLoader in
+         App.jsx), so it carries on seamlessly. This is a real child of #root,
+         so React's render() clears it out automatically when the app mounts. */
       .tk-boot {
         min-height: 100vh;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        font-family: Georgia, 'Times New Roman', serif;
-        font-size: 22px;
-        font-weight: 600;
         color: #EDE6D3;
-        opacity: 0.9;
-        letter-spacing: 0.3px;
       }
+      .tk-boot-cap {
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: 14px;
+        opacity: 0.8;
+        letter-spacing: 0.4px;
+        margin-top: 6px;
+      }
+      .tk-line{fill:none;stroke:#C9A227;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:100;stroke-dashoffset:100;animation:tkLineDraw 3s linear infinite}.tk-line-dot{fill:#EDE6D3;animation:tkLineDot 3s linear infinite}@keyframes tkLineDraw{0%{stroke-dashoffset:100;opacity:1}70%{stroke-dashoffset:0;opacity:1}88%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}@keyframes tkLineDot{0%{transform:translate(8px,66px);opacity:1}10.3%{transform:translate(34px,52px);opacity:1}18.5%{transform:translate(56px,60px);opacity:1}32.9%{transform:translate(84px,30px);opacity:1}42.0%{transform:translate(108px,40px);opacity:1}56.9%{transform:translate(140px,12px);opacity:1}70.0%{transform:translate(176px,22px);opacity:1}88%{transform:translate(176px,22px);opacity:1}100%{transform:translate(176px,22px);opacity:0}}@media (prefers-reduced-motion:reduce){.tk-line{animation:none!important;stroke-dashoffset:0!important}.tk-line-dot{animation:none!important;transform:translate(176px,22px)}}
     </style>
   </head>
   <body>
-    <div id="root"><div class="tk-boot">Track It</div></div>
+    <div id="root"><div class="tk-boot" role="status" aria-label="Loading"><svg viewBox="0 0 190 90" width="190" height="90" style="overflow:visible"><path d="M8 82 H182" stroke="rgba(237,230,211,.3)" stroke-width="2" fill="none"/><polyline class="tk-line" pathLength="100" points="8,66 34,52 56,60 84,30 108,40 140,12 176,22"/><circle class="tk-line-dot" r="5" cx="0" cy="0"/></svg><div class="tk-boot-cap">Tracking…</div></div></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
