@@ -2734,6 +2734,30 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     };
     const rows = [["Date", "Category", "Note", "Payment method", "Amount"]];
     visibleList.forEach((x) => rows.push([x.date, x.category, x.note || "", x.paymentMethod || "", x.amount]));
+
+    // A summary under the expense rows, using exactly the figures the dashboard
+    // shows for this month — a list of expenses alone doesn't say whether the
+    // month went well. It sits below a blank line, with each amount in the
+    // Amount column, so the table above stays clean for sorting/filtering.
+    const money = (v) => Number(Number(v).toFixed(2)); // no floating-point noise like 52995.000000001
+    const hasBudget = budgets.overall > 0;
+    const line = (label, value) => [label, "", "", "", value];
+    rows.push([]);
+    rows.push(line("SUMMARY", ""));
+    if (visibleList.length !== monthExpenses.length) {
+      rows.push(line("Note: the expense rows above are filtered, but this summary covers the whole month", ""));
+    }
+    rows.push(line("Currency", currency));
+    rows.push(line("Total income", money(monthIncomeTotal)));
+    rows.push(line("Total expenses", money(monthTotal)));
+    rows.push(line("Budget", hasBudget ? money(budgets.overall) : "Not set"));
+    if (hasBudget) rows.push(line("Budget remaining", money(budgets.overall - monthTotal)));
+    rows.push(line("Moved to savings this month", money(monthSavingsTotal)));
+    rows.push(line("Total savings balance", money(savingsCumulativeTotal)));
+    if (monthLoanImpact !== 0) rows.push(line("Loan repayments (included in net balance)", money(monthLoanImpact)));
+    rows.push(line("Net balance", money(monthNet)));
+    rows.push(line("Net balance = income - expenses - moved to savings, plus or minus loan repayments", ""));
+
     const csv = rows.map((r) => r.map(escapeCsv).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -2907,9 +2931,54 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
           <span>{MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear()}</span>
           <span>Generated {fmtDate(todayISO())}</span>
         </div>
-        <div style={styles.printTotalRow}>
-          <span>Total spent</span>
-          <span style={{ fontWeight: 700 }}><Money amount={monthTotal} size={16} /></span>
+        {/* Same figures as the dashboard (and the CSV export's summary), so a
+            list of expenses on its own isn't all the report says. */}
+        <h2 style={{ ...styles.printSectionTitle, marginTop: 0 }}>Summary</h2>
+        <table style={styles.printTable}>
+          <tbody>
+            <tr>
+              <td style={styles.printTdLabel}>Total income</td>
+              <td style={styles.printTdAmount}><Money amount={monthIncomeTotal} size={13} /></td>
+            </tr>
+            <tr>
+              <td style={{ ...styles.printTdLabel, fontWeight: 700 }}>Total expenses</td>
+              <td style={{ ...styles.printTdAmount, fontWeight: 700 }}><Money amount={monthTotal} size={13} /></td>
+            </tr>
+            <tr>
+              <td style={styles.printTdLabel}>Budget</td>
+              <td style={styles.printTdAmount}>
+                {budgets.overall > 0 ? <Money amount={budgets.overall} size={13} /> : "Not set"}
+              </td>
+            </tr>
+            {budgets.overall > 0 && (
+              <tr>
+                <td style={styles.printTdLabel}>Budget remaining</td>
+                <td style={styles.printTdAmount}><Money amount={budgets.overall - monthTotal} size={13} /></td>
+              </tr>
+            )}
+            <tr>
+              <td style={styles.printTdLabel}>Moved to savings this month</td>
+              <td style={styles.printTdAmount}><Money amount={monthSavingsTotal} size={13} /></td>
+            </tr>
+            <tr>
+              <td style={styles.printTdLabel}>Total savings balance</td>
+              <td style={styles.printTdAmount}><Money amount={savingsCumulativeTotal} size={13} /></td>
+            </tr>
+            {monthLoanImpact !== 0 && (
+              <tr>
+                <td style={styles.printTdLabel}>Loan repayments (included in net balance)</td>
+                <td style={styles.printTdAmount}><Money amount={monthLoanImpact} size={13} /></td>
+              </tr>
+            )}
+            <tr>
+              <td style={{ ...styles.printTdLabel, fontWeight: 700, borderTop: "2px solid #111" }}>Net balance</td>
+              <td style={{ ...styles.printTdAmount, fontWeight: 700, borderTop: "2px solid #111" }}><Money amount={monthNet} size={13} /></td>
+            </tr>
+          </tbody>
+        </table>
+        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 6 }}>
+          Net balance = income − expenses − moved to savings, plus or minus loan repayments.
+          {visibleList.length !== monthExpenses.length && " This summary covers the whole month; the transaction list below is filtered."}
         </div>
 
         {breakdown.length > 0 && (
