@@ -28,7 +28,7 @@ import {
   fetchCardReminders, createCardReminder, deleteCardReminder, markCardReminderNotified,
   fetchNotifications, insertNotification, markNotificationsRead,
   updateSavingsRemote, fetchLoans, createLoan, updateLoan, deleteLoan, updateLoanBalance, updateIncomeRemote,
-  fetchExpensesForMonth, fetchIncomeForMonth,
+  fetchExpensesForMonth, fetchIncomeForMonth, reportError,
 } from "./store";
 
 /* ---------------------------------------------------------------
@@ -240,6 +240,47 @@ function fmtDate(isoDate) {
 function isStorageFullError(err) {
   const msg = (err?.message || err?.error_description || String(err || "")).toLowerCase();
   return msg.includes("quota") || msg.includes("exceeded the maximum") || msg.includes("insufficient storage") || msg.includes("storage limit");
+}
+
+// Turns any error into a short, plain-language message that is safe to show.
+// Raw Supabase / Postgres / network text (table names, migrations, codes,
+// "Failed to fetch", JWT details...) must never reach the screen. Messages
+// we wrote ourselves are passed through; recognised technical cases are
+// mapped to friendly wording; everything else becomes `fallback`.
+const SAFE_MESSAGE_PREFIXES = [
+  "That person has already been invited", "Too many invites", "That photo is too large",
+  "Receipts must be a photo", "This needs an internet connection", "Importing needs an internet connection",
+  "No authenticator app",
+];
+function friendlyError(err, fallback = "Something went wrong. Please try again.") {
+  const raw = String(err?.message || err?.error_description || err || "");
+  const msg = raw.toLowerCase();
+  const code = String(err?.code || err?.status || "");
+  if (SAFE_MESSAGE_PREFIXES.some((p) => raw.startsWith(p))) return raw;
+  if (msg.includes("timed out") || msg.includes("timeout") || msg.includes("failed to fetch") || msg.includes("networkerror") ||
+      msg.includes("network request failed") || msg.includes("load failed") || msg.includes("fetch failed") || msg.includes("offline"))
+    return "Can't reach the server right now. Check your internet connection and try again.";
+  if (msg.includes("invalid login credentials") || msg.includes("invalid credentials"))
+    return "Incorrect email or password.";
+  if (msg.includes("email not confirmed")) return "Please confirm your email first — check your inbox for the link.";
+  if (msg.includes("already registered") || msg.includes("already been registered") || msg.includes("user already exists"))
+    return "An account with this email already exists. Try signing in instead.";
+  if (msg.includes("rate limit") || msg.includes("too many requests") || msg.includes("over_") || code === "429")
+    return "Too many attempts. Please wait a few minutes and try again.";
+  if (msg.includes("same password") || msg.includes("different from the old"))
+    return "New password must be different from your current one.";
+  if (msg.includes("password should") || msg.includes("weak password") || msg.includes("password is too"))
+    return "Please choose a stronger password (at least 6 characters).";
+  if (msg.includes("invalid totp") || msg.includes("invalid mfa") || msg.includes("invalid code") || msg.includes("mfa verification failed"))
+    return "That code didn't work. Check your authenticator app and try again.";
+  if (msg.includes("jwt") || msg.includes("session") || msg.includes("refresh token") || msg.includes("not authenticated") || code === "401")
+    return "Your session has expired. Please sign in again.";
+  if (msg.includes("expired") || msg.includes("invalid token") || msg.includes("otp"))
+    return "That link has expired. Please request a new one.";
+  if (isStorageFullError(err)) return "There's no storage space left. Please contact support.";
+  if (msg.includes("row-level security") || msg.includes("permission denied") || code === "42501" || code === "403")
+    return "You don't have permission to do that.";
+  return fallback;
 }
 
 // Distinguishes uploadReceipt()'s own client-side validation errors (too
@@ -565,18 +606,24 @@ class ErrorBoundary extends React.Component {
   static getDerivedStateFromError(error) {
     return { error };
   }
+  componentDidCatch(error) {
+    try { reportError(error, "ErrorBoundary"); } catch { /* ignore */ }
+  }
   render() {
     if (this.state.error) {
       return (
         <div style={{ ...styles.centerFill, color: T.parchment }}>
           <div style={{ ...styles.loginCard, textAlign: "center" }}>
-            <h2 style={{ fontFamily: "'Fraunces', serif", marginTop: 0 }}>Something broke</h2>
-            <p style={{ fontSize: 13.5, opacity: 0.7, wordBreak: "break-word" }}>
-              {String(this.state.error?.message || this.state.error)}
+            <h2 style={{ fontFamily: "'Fraunces', serif", marginTop: 0 }}>Something went wrong</h2>
+            <p style={{ fontSize: 13.5, opacity: 0.7 }}>
+              Sorry about that. Your data is safe. Please try again, or reload the app if it keeps happening.
             </p>
             <button style={styles.primaryBtn} onClick={() => this.setState({ error: null })}>
               Try again
             </button>
+            <div style={{ marginTop: 10 }}>
+              <button type="button" style={styles.textBtn} onClick={() => window.location.reload()}>Reload the app</button>
+            </div>
           </div>
         </div>
       );
@@ -920,7 +967,7 @@ function AuthScreen({ onLogin }) {
       if (err) throw err;
       // onAuthStateChange in the root App picks up the new session from here.
     } catch (err) {
-      setError(err?.message || "Couldn't sign in. Check your email and password.");
+      setError(friendlyError(err, "Couldn't sign in. Check your email and password."));
     } finally {
       setBusy(false);
     }
@@ -941,7 +988,7 @@ function AuthScreen({ onLogin }) {
       if (err) throw err;
       setNotice("Check your email for a link to reset your password.");
     } catch (err) {
-      setError(err?.message || "Couldn't send that reset link. Please try again.");
+      setError(friendlyError(err, "Couldn't send that reset link. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -969,7 +1016,7 @@ function AuthScreen({ onLogin }) {
       }
       // If a session came back immediately, onAuthStateChange in App handles the rest.
     } catch (err) {
-      setError(err?.message || "Couldn't create your account. Please try again.");
+      setError(friendlyError(err, "Couldn't create your account. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -1108,7 +1155,7 @@ function ResetPasswordScreen({ onDone }) {
       if (err) throw err;
       onDone();
     } catch (err) {
-      setError(err?.message || "Couldn't update your password. The link may have expired — request a new one.");
+      setError(friendlyError(err, "Couldn't update your password. The link may have expired — request a new one."));
     } finally {
       setBusy(false);
     }
@@ -1211,7 +1258,7 @@ function CompleteProfileModal({ ledgerId, defaultLedgerName, onSaved }) {
       // and reflecting the new ledger name immediately in local state).
       onSaved?.(`${first} ${last}`, trimmedLedgerName);
     } catch (err) {
-      setError(err?.message || "Couldn't save that. Please try again.");
+      setError(friendlyError(err, "Couldn't save that. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -1410,7 +1457,7 @@ function MfaChallengeScreen({ onVerified, onCancel }) {
       if (verifyErr) throw verifyErr;
       onVerified();
     } catch (err) {
-      setError(err?.message || "That code didn't work. Please try again.");
+      setError(friendlyError(err, "That code didn't work. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -1771,7 +1818,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
         console.error("Track It: failed to load ledger data —", err);
         setExpenses([]);
         setCustomCategories([]);
-        setError("Couldn't load saved data. If this keeps happening, check that every migration in the project's SQL files has been run in Supabase — starting fresh for now.");
+        reportError(err, "loadLedgerData");
+        setError("We couldn't load your data right now. Check your connection, then tap the Track It title to reload.");
       }
     })();
   }, [uid, profile.isDemo]);
@@ -4562,7 +4610,7 @@ function CardRemindersModal({ paymentMethods, reminders, onAdd, onDelete, onClos
       await onAdd({ cardName: finalName, dueDay: day, note: note.trim() });
       setCustomName(""); setNote(""); setCreating(false);
     } catch (err) {
-      setError(err?.message || "Couldn't add that reminder. Please try again.");
+      setError(friendlyError(err, "Couldn't add that reminder. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -4739,7 +4787,7 @@ function UpdateLoanBalanceModal({ loan, currentBalance, onCancel, onSave }) {
     try {
       await onSave(amt, date);
     } catch (err) {
-      setError(err?.message || "Couldn't save that. Please try again.");
+      setError(friendlyError(err, "Couldn't save that. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -4831,7 +4879,7 @@ function LoanForm({ initial, onCancel, onSave }) {
         note: note.trim(),
       });
     } catch (err) {
-      setError(err?.message || "Couldn't save that loan. Please try again.");
+      setError(friendlyError(err, "Couldn't save that loan. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -4978,7 +5026,7 @@ function RecurringModal({ categories, paymentMethods, templates, onAdd, onDelete
       }
       setAmount(""); setNote(""); setCreating(false);
     } catch (err) {
-      setError(err?.message || `Couldn't add that recurring ${isIncome ? "income" : "expense"}. Please try again.`);
+      setError(friendlyError(err, `Couldn't add that recurring ${isIncome ? "income" : "expense"}. Please try again.`));
     } finally {
       setBusy(false);
     }
@@ -5212,7 +5260,7 @@ function CsvImportModal({ categories, onImport, onClose }) {
       const res = await onImport(rows);
       setResult(res);
     } catch (err) {
-      setError(err?.message || "Import failed. Please try again.");
+      setError(friendlyError(err, "Import failed. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -5676,7 +5724,7 @@ function TwoFactorSection() {
       setSecret(data.totp.secret);
       setEnrolling(true);
     } catch (err) {
-      setError(err?.message || "Couldn't start setup. Please try again.");
+      setError(friendlyError(err, "Couldn't start setup. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -5697,7 +5745,7 @@ function TwoFactorSection() {
       setCode("");
       loadFactors();
     } catch (err) {
-      setError(err?.message || "That code didn't match. Please try again.");
+      setError(friendlyError(err, "That code didn't match. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -5717,7 +5765,7 @@ function TwoFactorSection() {
       setNotice("Two-factor authentication is off.");
       loadFactors();
     } catch (err) {
-      setError(err?.message || "Couldn't remove it. Please try again.");
+      setError(friendlyError(err, "Couldn't remove it. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -5908,7 +5956,7 @@ function SettingsModal({ userEmail, ledgerName, currency, onChangeCurrency, onCl
       setNotice("Password updated.");
       setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
     } catch (err) {
-      setError(err?.message || "Couldn't update your password. Please try again.");
+      setError(friendlyError(err, "Couldn't update your password. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -6099,7 +6147,7 @@ function LedgerSwitcherModal({ ledgerList, activeId, isOwner, onSwitch, onCreate
       setRenamingId(null);
       setRenameValue("");
     } catch (err) {
-      setRenameError(err?.message || "Couldn't rename that ledger. Please try again.");
+      setRenameError(friendlyError(err, "Couldn't rename that ledger. Please try again."));
     } finally {
       setRenameBusy(false);
     }
@@ -6114,7 +6162,7 @@ function LedgerSwitcherModal({ ledgerList, activeId, isOwner, onSwitch, onCreate
     try {
       await onCreate(trimmed);
     } catch (err) {
-      setError(err?.message || "Couldn't create that ledger. Please try again.");
+      setError(friendlyError(err, "Couldn't create that ledger. Please try again."));
       setBusy(false);
     }
   };
@@ -6128,7 +6176,7 @@ function LedgerSwitcherModal({ ledgerList, activeId, isOwner, onSwitch, onCreate
     try {
       await onDelete();
     } catch (err) {
-      setDeleteError(err?.message || "Couldn't delete that ledger. Please try again.");
+      setDeleteError(friendlyError(err, "Couldn't delete that ledger. Please try again."));
       setDeleting(false);
     }
   };
@@ -6339,7 +6387,7 @@ function MembersModal({ ledgerId, currentUserId, ledgerName, inviterName, onClos
       );
       await load();
     } catch (err) {
-      setError(err?.message || "Couldn't send that invite.");
+      setError(friendlyError(err, "Couldn't send that invite."));
     } finally {
       setBusy(false);
     }

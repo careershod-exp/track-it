@@ -22,7 +22,7 @@ if (SENTRY_DSN.startsWith("https://")) {
 // a friendly message. Deliberately NOT used for expected, user-facing
 // validation (wrong file type, already-invited, rate limits) — only for
 // things that indicate something actually went wrong.
-function reportError(error, context) {
+export function reportError(error, context) {
   try {
     Sentry.captureException(error, context ? { extra: { context } } : undefined);
   } catch {
