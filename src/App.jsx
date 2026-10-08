@@ -2834,13 +2834,28 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     <CurrencyContext.Provider value={{ code: currency, symbol: CURRENCIES.find((c) => c.code === currency)?.symbol || currency }}>
     <div style={styles.dashboardWrap}>
       <header style={styles.header}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* The logo and title double as a refresh button: tapping them reloads the
+            app. An anchor (not a button) because it holds a heading, which a
+            button isn't allowed to. Skipped in the demo (it lives only in memory,
+            so a reload would just throw it away) and while offline (a reload with
+            no connection risks landing on a browser error page instead of the app). */}
+        <a
+          href="/"
+          title="Refresh"
+          aria-label="Refresh Track It"
+          onClick={(e) => {
+            e.preventDefault();
+            if (profile.isDemo || !isOnline) return;
+            window.location.reload();
+          }}
+          style={{ display: "flex", alignItems: "center", gap: 10, color: "inherit", textDecoration: "none", cursor: "pointer", WebkitTapHighlightColor: "transparent" }}
+        >
           <TLogo size={20} color={T.gold} />
           <div style={{ display: "flex", flexDirection: "column" }}>
             <h1 style={styles.wordmarkSmall}>Track It</h1>
             <span style={styles.byline}>by Denin</span>
           </div>
-        </div>
+        </a>
         <div style={styles.headerToolbar}>
           {!profile.isDemo && ledgerList && ledgerList.length > 0 ? (
             <button
