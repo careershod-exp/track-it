@@ -2747,6 +2747,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     lines.push({ label: "Net balance", value: money(monthNet), net: true });
     return {
       lines,
+      categoryTotals: breakdown.map((c) => ({ name: c.name, value: money(c.value) })), // same figures as the PDF's "By category"
+      transactionsTitle: activeFilters.size > 0 ? "Filtered transactions" : "All transactions",
       filteredNote: visibleList.length !== monthExpenses.length
         ? "Note: the expense rows above are filtered, but this summary covers the whole month"
         : null,
@@ -2757,7 +2759,7 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
   // A formatted Excel file: real dates shown as dd-mm-yyyy, amounts like 100,000.00,
   // bold summary figures. A CSV can't carry any of that formatting.
   const handleExportXLSX = () => {
-    const { lines, filteredNote, formulaNote } = getExportSummary();
+    const { lines, categoryTotals, transactionsTitle, filteredNote, formulaNote } = getExportSummary();
     const monthLabel = `${MONTHS[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`;
     const bytes = buildExpenseWorkbook({
       title: `Track It — ${monthLabel}`,
@@ -2765,6 +2767,8 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
       currency,
       summary: lines,
       notes: [filteredNote, formulaNote].filter(Boolean),
+      categories: categoryTotals,
+      transactionsTitle,
       rows: visibleList.map((x) => ({
         date: x.date, category: x.category, note: x.note || "", paymentMethod: x.paymentMethod || "", amount: Number(x.amount),
       })),
@@ -2792,13 +2796,23 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     // Summary under the expense rows (a list of expenses alone doesn't say whether
     // the month went well). It sits below a blank line with each amount in the
     // Amount column, so the table above stays clean for sorting/filtering.
-    const { lines, filteredNote, formulaNote } = getExportSummary();
+    const { lines, categoryTotals, filteredNote, formulaNote } = getExportSummary();
     const line = (label, value) => [label, "", "", "", value];
+    rows.push([]);
+    rows.push(line("REPORT", ""));
+    rows.push(line(`Ledger: ${profile.name}`, ""));
+    rows.push(line(`Month: ${MONTHS[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`, ""));
+    rows.push(line(`Generated: ${fmtDate(todayISO())}`, ""));
     rows.push([]);
     rows.push(line("SUMMARY", ""));
     if (filteredNote) rows.push(line(filteredNote, ""));
     lines.forEach((l) => rows.push(line(l.label, l.value ?? "")));
     rows.push(line(formulaNote, ""));
+    if (categoryTotals.length > 0) {
+      rows.push([]);
+      rows.push(line("BY CATEGORY", ""));
+      categoryTotals.forEach((c) => rows.push(line(c.name, c.value)));
+    }
 
     const csv = rows.map((r) => r.map(escapeCsv).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });

@@ -169,9 +169,10 @@ function stylesXml() {
 
 // ---------- the workbook ----------
 // title/subtitle: strings. summary: [{ label, value|null, bold?, redNegative?, net? }]
-// notes: [string]. rows: [{ date (YYYY-MM-DD), category, note, paymentMethod, amount }]
+// notes: [string]. categories: [{ name, value }] (spending per category, shown like the PDF's
+// "By category" table). rows: [{ date (YYYY-MM-DD), category, note, paymentMethod, amount }]
 export function buildExpenseWorkbook({
-  title, subtitle, currency = "", summary = [], notes = [], rows = [],
+  title, subtitle, currency = "", summary = [], notes = [], categories = [], transactionsTitle = "", rows = [],
   emptyMessage = "No expenses this month", sheetName = "Track It",
 }) {
   const strings = [];
@@ -214,6 +215,19 @@ export function buildExpenseWorkbook({
   }
   for (const n of notes) addRow([["A", "s", n, "note"]]);
   blank();
+
+  if (categories.length > 0) {
+    addRow(across("section", "BY CATEGORY"));
+    for (const c of categories) {
+      addRow([
+        ["A", "s", c.name, "label"], ["B", "b", null, "label"], ["C", "b", null, "label"], ["D", "b", null, "label"],
+        ["E", "n", Number(c.value), "cellAmount"],
+      ]);
+    }
+    blank();
+  }
+
+  if (transactionsTitle) addRow(across("section", transactionsTitle.toUpperCase()));
 
   addRow([
     ["A", "s", "Date", "headLeft"], ["B", "s", "Category", "headLeft"], ["C", "s", "Note", "headLeft"],
