@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import Papa from "papaparse";
 import { supabase } from "./supabaseClient";
+import { buildExpenseWorkbook } from "./xlsxExport";
 import {
   pingDatabase, ensureLedger, fetchLedgerData, fetchUserLedgers, createLedger,
   saveCategoriesRemote, savePaymentMethodsRemote, fetchExpenses,
@@ -2727,36 +2728,77 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
     });
   };
 
+  // The figures shown at the foot of both the CSV and the Excel export — the same
+  // ones the dashboard shows for this month.
+  const getExportSummary = () => {
+    const money = (v) => Number(Number(v).toFixed(2)); // no floating-point noise like 52995.000000001
+    const hasBudget = budgets.overall > 0;
+    const lines = [
+      { label: "Total income", value: money(monthIncomeTotal) },
+      { label: "Total expenses", value: money(monthTotal), bold: true },
+      hasBudget
+        ? { label: "Budget", value: money(budgets.overall) }
+        : { label: "Budget (not set)", value: null },
+    ];
+    if (hasBudget) lines.push({ label: "Budget remaining", value: money(budgets.overall - monthTotal), redNegative: true });
+    lines.push({ label: "Moved to savings this month", value: money(monthSavingsTotal) });
+    lines.push({ label: "Total savings balance", value: money(savingsCumulativeTotal) });
+    if (monthLoanImpact !== 0) lines.push({ label: "Loan repayments (included in net balance)", value: money(monthLoanImpact) });
+    lines.push({ label: "Net balance", value: money(monthNet), net: true });
+    return {
+      lines,
+      filteredNote: visibleList.length !== monthExpenses.length
+        ? "Note: the expense rows above are filtered, but this summary covers the whole month"
+        : null,
+      formulaNote: "Net balance = income - expenses - moved to savings, plus or minus loan repayments",
+    };
+  };
+
+  // A formatted Excel file: real dates shown as dd-mm-yyyy, amounts like 100,000.00,
+  // bold summary figures. A CSV can't carry any of that formatting.
+  const handleExportXLSX = () => {
+    const { lines, filteredNote, formulaNote } = getExportSummary();
+    const monthLabel = `${MONTHS[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`;
+    const bytes = buildExpenseWorkbook({
+      title: `Track It — ${monthLabel}`,
+      subtitle: `${profile.name}  ·  Generated ${fmtDate(todayISO())}  ·  Amounts in ${currency}`,
+      currency,
+      summary: lines,
+      notes: [filteredNote, formulaNote].filter(Boolean),
+      rows: visibleList.map((x) => ({
+        date: x.date, category: x.category, note: x.note || "", paymentMethod: x.paymentMethod || "", amount: Number(x.amount),
+      })),
+      emptyMessage: "No expenses this month",
+    });
+    const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `track-it-${MONTHS[monthCursor.getMonth()].toLowerCase()}-${monthCursor.getFullYear()}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const handleExportCSV = () => {
     const escapeCsv = (val) => {
       const s = String(val ?? "");
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const rows = [["Date", "Category", "Note", "Payment method", "Amount"]];
+    const rows = [["Date", "Category", "Note", "Payment method", `Amount (${currency})`]];
     visibleList.forEach((x) => rows.push([x.date, x.category, x.note || "", x.paymentMethod || "", x.amount]));
 
-    // A summary under the expense rows, using exactly the figures the dashboard
-    // shows for this month — a list of expenses alone doesn't say whether the
-    // month went well. It sits below a blank line, with each amount in the
+    // Summary under the expense rows (a list of expenses alone doesn't say whether
+    // the month went well). It sits below a blank line with each amount in the
     // Amount column, so the table above stays clean for sorting/filtering.
-    const money = (v) => Number(Number(v).toFixed(2)); // no floating-point noise like 52995.000000001
-    const hasBudget = budgets.overall > 0;
+    const { lines, filteredNote, formulaNote } = getExportSummary();
     const line = (label, value) => [label, "", "", "", value];
     rows.push([]);
     rows.push(line("SUMMARY", ""));
-    if (visibleList.length !== monthExpenses.length) {
-      rows.push(line("Note: the expense rows above are filtered, but this summary covers the whole month", ""));
-    }
-    rows.push(line("Currency", currency));
-    rows.push(line("Total income", money(monthIncomeTotal)));
-    rows.push(line("Total expenses", money(monthTotal)));
-    rows.push(line("Budget", hasBudget ? money(budgets.overall) : "Not set"));
-    if (hasBudget) rows.push(line("Budget remaining", money(budgets.overall - monthTotal)));
-    rows.push(line("Moved to savings this month", money(monthSavingsTotal)));
-    rows.push(line("Total savings balance", money(savingsCumulativeTotal)));
-    if (monthLoanImpact !== 0) rows.push(line("Loan repayments (included in net balance)", money(monthLoanImpact)));
-    rows.push(line("Net balance", money(monthNet)));
-    rows.push(line("Net balance = income - expenses - moved to savings, plus or minus loan repayments", ""));
+    if (filteredNote) rows.push(line(filteredNote, ""));
+    lines.forEach((l) => rows.push(line(l.label, l.value ?? "")));
+    rows.push(line(formulaNote, ""));
 
     const csv = rows.map((r) => r.map(escapeCsv).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -2824,6 +2866,13 @@ function Dashboard({ profile, currentUserId, userEmail, onLogout, ledgerList, on
                     onClick={() => { setExportMenuOpen(false); window.print(); }}
                   >
                     <Download size={14} /> PDF
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.exportMenuItem}
+                    onClick={() => { setExportMenuOpen(false); handleExportXLSX(); }}
+                  >
+                    <FileSpreadsheet size={14} /> Excel (.xlsx)
                   </button>
                   <button
                     type="button"
