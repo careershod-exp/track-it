@@ -937,6 +937,10 @@ function BootScreen() {
 function Footer() {
   return (
     <footer style={styles.footer}>
+      <a href="/how-it-works/" target="_blank" rel="noopener noreferrer" style={styles.footerLink}>How it works</a>
+      <span style={styles.footerDivider}>·</span>
+      <a href="/faq/" target="_blank" rel="noopener noreferrer" style={styles.footerLink}>FAQ</a>
+      <span style={styles.footerDivider}>·</span>
       <a href="mailto:trackituae.com@gmail.com" style={styles.footerLink}>Contact us</a>
       <span style={styles.footerDivider}>·</span>
       <span>© {new Date().getFullYear()} Track It. All rights reserved.</span>
@@ -6020,6 +6024,11 @@ function SettingsModal({ userEmail, ledgerName, currency, onChangeCurrency, onCl
         </button>
 
         <div style={{ marginTop: 26, paddingTop: 16, borderTop: `1px solid ${T.parchmentDim}`, textAlign: "center" }}>
+          <div style={{ fontSize: 12.5, marginBottom: 12 }}>
+            <a href="/how-it-works/" target="_blank" rel="noopener noreferrer" style={{ color: T.ink, opacity: 0.75 }}>How it works</a>
+            <span style={{ opacity: 0.4, margin: "0 8px" }}>·</span>
+            <a href="/faq/" target="_blank" rel="noopener noreferrer" style={{ color: T.ink, opacity: 0.75 }}>FAQ</a>
+          </div>
           <a href="/delete-account/" target="_blank" rel="noopener noreferrer" style={{ fontSize: 12.5, color: T.brick, opacity: 0.75 }}>
             Delete my account
           </a>
